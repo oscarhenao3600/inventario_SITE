@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart } from 'lucide-react';
+import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download } from 'lucide-react';
+
+const noSerialTypes = [
+  "Servidor Portable de Aula SITE Sistema Cloud",
+  "Soporte Electrónico Pantalla Interactiva Táctil",
+  "Carro Cargador de Tabletas"
+];
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('search');
@@ -11,7 +17,12 @@ const App = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingDevice, setEditingDevice] = useState(null);
   const [dupField, setDupField] = useState('placa');
+  const [filtroTipoDup, setFiltroTipoDup] = useState('');
   const [stats, setStats] = useState({ total: 0, totalSedes: 0, totalInstituciones: 0, totalDuplicadosPlaca: 0, totalDuplicadosSerial: 0 });
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importStats, setImportStats] = useState(null);
+  const [tiposDispositivo, setTiposDispositivo] = useState([]);
   
   // Advanced filters
   const [filtroInstitucion, setFiltroInstitucion] = useState('');
@@ -25,7 +36,17 @@ const App = () => {
 
   useEffect(() => {
     fetchStats();
+    fetchTipos();
   }, []);
+
+  const fetchTipos = async () => {
+    try {
+      const res = await axios.get('/api/tipos');
+      setTiposDispositivo(res.data);
+    } catch (err) {
+      console.error("Error fetching types", err);
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -37,10 +58,10 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (activeTab === 'dupes') {
+    if (activeTab === 'dupes' && duplicados.length === 0) {
       fetchDuplicados();
     }
-  }, [activeTab, dupField, filtroSede]);
+  }, [activeTab]);
 
   const handleSearch = async () => {
     try {
@@ -63,7 +84,7 @@ const App = () => {
 
   const fetchDuplicados = async () => {
     try {
-      const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}`);
+      const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}`);
       setDuplicados(res.data);
     } catch (err) {
       console.error("Error fetching duplicates", err);
@@ -119,6 +140,7 @@ const App = () => {
       setShowModal(false);
       activeTab === 'search' ? handleSearch() : fetchDuplicados();
       fetchStats();
+      fetchTipos();
     } catch (err) {
       console.error("Error saving", err);
     }
@@ -135,6 +157,34 @@ const App = () => {
       link.click();
     } catch (err) {
       console.error("Error exporting", err);
+      const msg = err.response?.data?.error || "Error al exportar a Excel. La lista podría ser demasiado grande.";
+      alert(msg);
+    }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('archivo', file);
+
+    setImporting(true);
+    setImportStats(null);
+
+    try {
+      const res = await axios.post('/api/importar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setImportStats(res.data);
+      fetchStats();
+      fetchTipos();
+      if (activeTab === 'search') handleSearch();
+    } catch (err) {
+      console.error("Error importing", err);
+      alert("Error al importar el archivo. Asegúrate de que sea un formato válido de Excel.");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -145,9 +195,14 @@ const App = () => {
           <h1>Inventario Aulas Site</h1>
           <p style={{color: 'var(--text-muted)'}}>Gestión y Visualización de Dispositivos</p>
         </div>
-        <button className="btn btn-primary" onClick={() => openModal()}>
-          <Plus size={18} /> Nuevo Dispositivo
-        </button>
+        <div style={{display: 'flex', gap: '1rem'}}>
+          <button className="btn btn-outline" onClick={() => setShowImportModal(true)}>
+            <FileUp size={18} /> Importar Excel
+          </button>
+          <button className="btn btn-primary" onClick={() => openModal()}>
+            <Plus size={18} /> Nuevo Dispositivo
+          </button>
+        </div>
       </header>
       
       <div className="stats-grid" style={{marginBottom: '2rem'}}>
@@ -262,7 +317,14 @@ const App = () => {
               <tbody>
                 {dispositivos.map(d => (
                   <tr key={d._id}>
-                    <td><span style={{fontWeight: 'bold', color: 'var(--accent)'}}>{d.placa}</span></td>
+                    <td>
+                      <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                        <span style={{fontWeight: 'bold', color: 'var(--accent)'}}>{d.placa}</span>
+                        {d.notas && d.notas.trim() !== '' && (
+                          <Check size={14} color="var(--success)" title="Revisado (con notas)" />
+                        )}
+                      </div>
+                    </td>
                     <td>{d.serial}</td>
                     <td>{d.dispositivo}</td>
                     <td>
@@ -300,18 +362,68 @@ const App = () => {
           </div>
 
           <div className="glass-card" style={{marginBottom: '2rem'}}>
-            <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
-              <Filter size={18} color="var(--text-muted)" />
-              <input 
-                type="text" 
-                className="search-input" 
-                style={{marginBottom: 0, padding: '0.5rem 1rem'}}
-                placeholder="Filtrar duplicados por Sede..." 
-                value={filtroSede}
-                onChange={(e) => setFiltroSede(e.target.value)}
-              />
+            <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end'}}>
+              <div style={{flex: 1, minWidth: '200px'}}>
+                <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Sede</label>
+                <div style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
+                  <Filter size={18} color="var(--text-muted)" style={{position: 'absolute', left: '10px'}} />
+                  <input 
+                    type="text" 
+                    className="search-input" 
+                    style={{marginBottom: 0, padding: '0.5rem 1rem 0.5rem 2.5rem', width: '100%'}}
+                    placeholder="Ej: Sede Principal..." 
+                    value={filtroSede}
+                    onChange={(e) => setFiltroSede(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div style={{flex: 1, minWidth: '200px'}}>
+                <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Tipo de Dispositivo</label>
+                <select 
+                  className="search-input" 
+                  style={{margin: 0, padding: '0.5rem', width: '100%', background: 'var(--bg-card)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}} 
+                  value={filtroTipoDup}
+                  onChange={(e) => setFiltroTipoDup(e.target.value)}
+                >
+                  <option value="">Todos los tipos</option>
+                  {tiposDispositivo.map(tipo => (
+                    <option key={tipo} value={tipo}>{tipo}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{display: 'flex', gap: '1rem'}}>
+                <button className="btn btn-primary" onClick={fetchDuplicados} style={{height: 'unset', padding: '0.6rem 2rem'}}>
+                  Consultar Duplicados
+                </button>
+                <button className="btn btn-outline" onClick={() => {setFiltroSede(''); setFiltroTipoDup('');}}>
+                  Limpiar
+                </button>
+              </div>
             </div>
+            <p style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.8rem'}}>
+              Tip: Servidores, carros de carga y soportes suelen no tener serial. Puedes filtrarlos para limpiar la vista.
+            </p>
           </div>
+
+          {dupField === 'serial' && noSerialTypes.includes(filtroTipoDup) && (
+            <div style={{
+              background: 'rgba(245, 158, 11, 0.1)', 
+              borderLeft: '4px solid #f59e0b', 
+              padding: '1rem', 
+              borderRadius: '8px', 
+              marginBottom: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              color: '#fbbf24'
+            }}>
+              <AlertCircle size={20} />
+              <div style={{fontSize: '0.9rem'}}>
+                <strong>Atención:</strong> Estos dispositivos generalmente no cuentan con número de serial. 
+                Se recomienda usar el filtro de <strong>Placas Repetidas</strong> para estos casos o simplemente filtrarlos de esta vista.
+              </div>
+            </div>
+          )}
 
           {duplicados.map(group => (
             <div className="glass-card" key={group._id} style={{marginBottom: '1rem', borderLeft: '4px solid var(--danger)'}}>
@@ -326,6 +438,7 @@ const App = () => {
                   <tr>
                     <th>Placa</th>
                     <th>Serial</th>
+                    <th>Dispositivo</th>
                     <th>Institución</th>
                     <th>Sede</th>
                     <th>Aula</th>
@@ -335,8 +448,16 @@ const App = () => {
                 <tbody>
                   {group.docs.map(doc => (
                     <tr key={doc._id}>
-                      <td>{doc.placa}</td>
+                      <td>
+                        <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                          <span>{doc.placa}</span>
+                          {doc.notas && doc.notas.trim() !== '' && (
+                            <Check size={14} color="var(--success)" title="Revisado (con notas)" />
+                          )}
+                        </div>
+                      </td>
                       <td>{doc.serial}</td>
+                      <td>{doc.dispositivo}</td>
                       <td>{doc.institucion}</td>
                       <td>{doc.sede}</td>
                       <td>{doc.aula}</td>
@@ -396,7 +517,24 @@ const App = () => {
 
               <div className="form-group">
                 <label>Tipo de Dispositivo</label>
-                <input value={formData.dispositivo} onChange={e => setFormData({...formData, dispositivo: e.target.value})} />
+                <select 
+                  value={formData.dispositivo} 
+                  onChange={e => setFormData({...formData, dispositivo: e.target.value})}
+                  style={{width: '100%', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}}
+                >
+                  <option value="">Seleccione un tipo...</option>
+                  {tiposDispositivo.map(tipo => (
+                    <option key={tipo} value={tipo}>{tipo}</option>
+                  ))}
+                  <option value="OTRO">-- Otro (Escribir abajo) --</option>
+                </select>
+                {formData.dispositivo === 'OTRO' && (
+                  <input 
+                    style={{marginTop: '0.5rem'}}
+                    placeholder="Escriba el nuevo tipo..." 
+                    onChange={e => setFormData({...formData, dispositivo: e.target.value})} 
+                  />
+                )}
               </div>
 
               <div className="form-group">
@@ -427,6 +565,104 @@ const App = () => {
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancelar</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="modal-overlay">
+          <div className="modal glass-card" style={{maxWidth: '500px'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
+              <h2>Importar desde Excel</h2>
+              <button 
+                onClick={() => {setShowImportModal(false); setImportStats(null);}} 
+                style={{background: 'none', border: 'none', color: 'white', cursor: 'pointer'}}
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {!importStats ? (
+              <div>
+                <p style={{marginBottom: '1.5rem', color: 'var(--text-muted)'}}>
+                  Sube un archivo Excel (.xlsx) con las columnas en este orden:
+                  <br /><br />
+                  <code style={{fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '5px', borderRadius: '4px'}}>
+                    Dispositivo, Aula, Placa, Serial, Institución, Sede, Modelo, Notas
+                  </code>
+                </p>
+                
+                <div style={{
+                  border: '2px dashed rgba(255,255,255,0.2)',
+                  borderRadius: '8px',
+                  padding: '2rem',
+                  textAlign: 'center',
+                  marginBottom: '1.5rem'
+                }}>
+                  {importing ? (
+                    <div>
+                      <div className="spinner" style={{marginBottom: '1rem'}}></div>
+                      <p>Procesando archivo... por favor espera.</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <FileUp size={48} color="var(--accent)" style={{marginBottom: '1rem', opacity: 0.5}} />
+                      <p style={{marginBottom: '1rem'}}>Selecciona tu archivo de inventario</p>
+                      <input 
+                        type="file" 
+                        accept=".xlsx" 
+                        onChange={handleImport}
+                        style={{display: 'none'}}
+                        id="excel-upload"
+                      />
+                      <label htmlFor="excel-upload" className="btn btn-primary" style={{cursor: 'pointer'}}>
+                        Seleccionar Archivo
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{background: 'rgba(59, 130, 246, 0.1)', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', borderLeft: '4px solid var(--accent)'}}>
+                   <p style={{fontSize: '0.85rem', color: 'var(--accent)'}}>
+                     <strong>Nota:</strong> Si la placa o el serial ya existen, el sistema actualizará la información del dispositivo en lugar de crear un duplicado.
+                   </p>
+                </div>
+              </div>
+            ) : (
+              <div style={{textAlign: 'center', padding: '1rem'}}>
+                <div style={{
+                  width: '60px', 
+                  height: '60px', 
+                  background: 'var(--success)', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  margin: '0 auto 1.5rem'
+                }}>
+                  <Check size={32} color="white" />
+                </div>
+                <h3 style={{marginBottom: '1rem'}}>¡Carga Completada!</h3>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem'}}>
+                   <div className="glass-card" style={{padding: '1rem'}}>
+                      <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--accent)'}}>{importStats.updates}</div>
+                      <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Actualizados</div>
+                   </div>
+                   <div className="glass-card" style={{padding: '1rem'}}>
+                      <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)'}}>{importStats.inserts}</div>
+                      <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Nuevos</div>
+                   </div>
+                </div>
+                {importStats.errors > 0 && (
+                  <p style={{color: 'var(--danger)', marginBottom: '1.5rem'}}>
+                    Se encontraron {importStats.errors} errores durante el proceso.
+                  </p>
+                )}
+                <button className="btn btn-primary" style={{width: '100%'}} onClick={() => {setShowImportModal(false); setImportStats(null);}}>
+                  Cerrar
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

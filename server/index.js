@@ -2,51 +2,83 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
 const ExcelJS = require('exceljs');
+const multer = require('multer');
+const fs = require('fs');
+
+const uploadDir = 'uploads/';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+const upload = multer({ dest: uploadDir });
 
 const app = express();
 const port = 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 const uri = 'mongodb://localhost:27017';
 const client = new MongoClient(uri);
 const dbName = 'inventario_educativo';
+let db;
 
 async function connectDB() {
-  await client.connect();
-  return client.db(dbName);
+  if (db) return db;
+  try {
+    await client.connect();
+    console.log('Connected to MongoDB');
+    db = client.db(dbName);
+    return db;
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    process.exit(1);
+  }
 }
 
+// Inicializar conexión al arrancar
+connectDB();
+
 // Buscar dispositivos (por placa o serial)
-app.get('/api/dispositivos', async (req, res) => {
-  const { q } = req.query;
-  const db = await connectDB();
+app.get('/api/dispositivos', async (req, res, next) => {
+  try {
+    const { q } = req.query;
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   
   let query = {};
   if (q) {
-    query = {
-      $or: [
-        { placa: { $regex: q, $options: 'i' } },
-        { serial: { $regex: q, $options: 'i' } }
-      ]
-    };
+    if (q.length > 5) {
+      // Buscar por serial si tiene más de 5 caracteres
+      query = { serial: { $regex: q, $options: 'i' } };
+    } else {
+      // Buscar por placa si tiene 5 o menos caracteres
+      query = { placa: { $regex: q, $options: 'i' } };
+    }
   }
   
   const results = await collection.find(query).toArray();
   res.json(results);
+  } catch (err) { next(err); }
 });
 
 // Obtener duplicados (placas o seriales repetidos)
-app.get('/api/duplicados', async (req, res) => {
-  const { campo, sede } = req.query; // campo: 'placa' o 'serial'
-  const db = await connectDB();
+app.get('/api/duplicados', async (req, res, next) => {
+  try {
+    const { campo, sede, tipo } = req.query; // campo: 'placa' o 'serial'
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   
   const field = campo === 'serial' ? 'serial' : 'placa';
   
-  const pipeline = [
+  const pipeline = [];
+  
+  // Agregar filtro de dispositivo si se especifica
+  if (tipo) {
+    pipeline.push({ $match: { dispositivo: { $regex: tipo, $options: 'i' } } });
+  }
+
+  pipeline.push(
     {
       $group: {
         _id: `$${field}`,
@@ -55,7 +87,7 @@ app.get('/api/duplicados', async (req, res) => {
       }
     },
     { $match: { count: { $gt: 1 }, _id: { $ne: null, $ne: "" } } }
-  ];
+  );
 
   let results = await collection.aggregate(pipeline).toArray();
   
@@ -67,12 +99,14 @@ app.get('/api/duplicados', async (req, res) => {
   }
   
   res.json(results);
+  } catch (err) { next(err); }
 });
 
 // Validar unicidad antes de guardar/editar
-app.post('/api/validar', async (req, res) => {
-  const { placa, serial, id } = req.body;
-  const db = await connectDB();
+app.post('/api/validar', async (req, res, next) => {
+  try {
+    const { placa, serial, id } = req.body;
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   
   const query = {
@@ -98,20 +132,24 @@ app.post('/api/validar', async (req, res) => {
   }
   
   res.json({ available: true });
+  } catch (err) { next(err); }
 });
 
 // Agregar nuevo dispositivo
-app.post('/api/dispositivos', async (req, res) => {
-  const db = await connectDB();
+app.post('/api/dispositivos', async (req, res, next) => {
+  try {
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   const result = await collection.insertOne(req.body);
   res.json(result);
+  } catch (err) { next(err); }
 });
 
 // Editar dispositivo
-app.put('/api/dispositivos/:id', async (req, res) => {
-  const { id } = req.params;
-  const db = await connectDB();
+app.put('/api/dispositivos/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   const { _id, ...updateData } = req.body;
   const result = await collection.updateOne(
@@ -119,11 +157,17 @@ app.put('/api/dispositivos/:id', async (req, res) => {
     { $set: updateData }
   );
   res.json(result);
+  } catch (err) { next(err); }
 });
 
 // Exportar a Excel
-app.post('/api/exportar', async (req, res) => {
-  const { dispositivos } = req.body;
+app.post('/api/exportar', async (req, res, next) => {
+  try {
+    const { dispositivos } = req.body;
+    
+    if (!dispositivos || !Array.isArray(dispositivos)) {
+      return res.status(400).json({ error: 'Lista de dispositivos no proporcionada o inválida' });
+    }
   
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Inventario');
@@ -160,21 +204,114 @@ app.post('/api/exportar', async (req, res) => {
 
   await workbook.xlsx.write(res);
   res.end();
+  } catch (err) { next(err); }
+});
+
+// Importar desde Excel (Cargue Masivo con Upsert)
+app.post('/api/importar', upload.single('archivo'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo' });
+
+  try {
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+    
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(req.file.path);
+    const worksheet = workbook.getWorksheet(1);
+    
+    let updates = 0;
+    let inserts = 0;
+    let errors = 0;
+    let rowCount = 0;
+
+    const rows = [];
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        rows.push(row);
+      }
+    });
+
+    for (const row of rows) {
+      try {
+        const data = {
+          dispositivo: row.getCell(1).text?.trim(),
+          aula: row.getCell(2).text?.trim(),
+          placa: row.getCell(3).text?.trim(),
+          serial: row.getCell(4).text?.trim(),
+          institucion: row.getCell(5).text?.trim(),
+          sede: row.getCell(6).text?.trim(),
+          modelo: row.getCell(7).text?.trim(),
+          notas: row.getCell(8).text?.trim()
+        };
+
+        if (!data.placa && !data.serial) continue;
+
+        let existing = null;
+        if (data.placa) {
+          existing = await collection.findOne({ placa: data.placa });
+        }
+        
+        if (!existing && data.serial) {
+          existing = await collection.findOne({ serial: data.serial });
+        }
+
+        if (existing) {
+          await collection.updateOne({ _id: existing._id }, { $set: data });
+          updates++;
+        } else {
+          await collection.insertOne(data);
+          inserts++;
+        }
+        rowCount++;
+      } catch (err) {
+        console.error('Error procesando fila:', err);
+        errors++;
+      }
+    }
+
+    // Limpiar archivo temporal
+    fs.unlinkSync(req.file.path);
+
+    res.json({ 
+      success: true, 
+      updates, 
+      inserts, 
+      errors, 
+      totalProcessed: rowCount 
+    });
+  } catch (err) {
+    console.error("Error en importación:", err);
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: 'Error procesando el archivo de Excel' });
+  }
 });
 
 // Eliminar dispositivo
-app.delete('/api/dispositivos/:id', async (req, res) => {
-  const { id } = req.params;
-  const db = await connectDB();
+app.delete('/api/dispositivos/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   
   const result = await collection.deleteOne({ _id: new ObjectId(id) });
   res.json(result);
+  } catch (err) { next(err); }
+});
+
+// Obtener tipos de dispositivos únicos
+app.get('/api/tipos', async (req, res, next) => {
+  try {
+    const db = await connectDB();
+  const collection = db.collection('dispositivos');
+  const tipos = await collection.distinct('dispositivo');
+  res.json(tipos.filter(t => t && t.trim() !== ''));
+  } catch (err) { next(err); }
 });
 
 // Estadísticas generales
-app.get('/api/stats', async (req, res) => {
-  const db = await connectDB();
+app.get('/api/stats', async (req, res, next) => {
+  try {
+    const db = await connectDB();
   const collection = db.collection('dispositivos');
   
   const total = await collection.countDocuments();
@@ -206,6 +343,16 @@ app.get('/api/stats', async (req, res) => {
     totalDuplicadosPlaca,
     totalDuplicadosSerial
   });
+  } catch (err) { next(err); }
+});
+
+// Middleware de manejo de errores global
+app.use((err, req, res, next) => {
+  console.error('Error en el servidor:', err);
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'La solicitud es demasiado grande. Intenta filtrar más los resultados.' });
+  }
+  res.status(500).json({ error: 'Ocurrió un error en el servidor', details: err.message });
 });
 
 app.listen(port, () => {
