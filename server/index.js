@@ -4,6 +4,11 @@ const cors = require('cors');
 const ExcelJS = require('exceljs');
 const multer = require('multer');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
+
+const JWT_SECRET = 'your-secret-key-change-this-in-production'; // Recomendado: usar variables de entorno
 
 const uploadDir = 'uploads/';
 if (!fs.existsSync(uploadDir)) {
@@ -15,6 +20,9 @@ const app = express();
 const port = 3001;
 
 app.use(cors());
+app.use(helmet({
+  contentSecurityPolicy: false, // Deshabilitar para permitir desarrollo local más fácil si es necesario
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -39,10 +47,116 @@ async function connectDB() {
 // Inicializar conexión al arrancar
 connectDB();
 
+// Middleware para proteger rutas
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Token inválido o expirado.' });
+    req.user = user;
+    next();
+  });
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Acceso restringido. Se requieren permisos de administrador.' });
+  }
+}
+
+// --- Rutas de Autenticación ---
+
+// Registro de usuario
+app.post('/api/auth/register', async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+    }
+
+    const db = await connectDB();
+    const collection = db.collection('usuarios');
+
+    // Verificar si el usuario ya existe
+    const existing = await collection.findOne({ username });
+    if (existing) {
+      return res.status(400).json({ error: 'El nombre de usuario ya está en uso' });
+    }
+
+    // El primer usuario registrado será el admin
+    const userCount = await collection.countDocuments();
+    const role = userCount === 0 ? 'admin' : 'lector';
+
+    // Hashear contraseña
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const result = await collection.insertOne({
+      username,
+      password: hashedPassword,
+      role,
+      createdAt: new Date()
+    });
+
+    res.json({ success: true, message: `Usuario registrado como ${role} con éxito` });
+  } catch (err) { next(err); }
+});
+
+// Login de usuario
+app.post('/api/auth/login', async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+    
+    const db = await connectDB();
+    const collection = db.collection('usuarios');
+
+    const user = await collection.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // Generar Token con el Rol
+    const token = jwt.sign(
+      { id: user._id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({ token, username: user.username, role: user.role });
+  } catch (err) { next(err); }
+});
+
+// --- Rutas de Inventario (Protegidas) ---
+
+// Aplicar middleware a todas las rutas de la API de inventario
+app.use('/api/dispositivos', authenticateToken);
+app.use('/api/duplicados', authenticateToken);
+app.use('/api/validar', authenticateToken);
+app.use('/api/exportar', authenticateToken);
+app.use('/api/importar', authenticateToken, requireAdmin);
+app.use('/api/exportar-total', authenticateToken, requireAdmin);
+app.use('/api/stats', authenticateToken);
+app.use('/api/tipos', authenticateToken);
+
+// Rutas de escritura protegidas adicionalmente por rol
+app.post('/api/dispositivos', requireAdmin);
+app.put('/api/dispositivos/:id', requireAdmin);
+app.delete('/api/dispositivos/:id', requireAdmin);
+
 // Buscar dispositivos (por placa o serial)
 app.get('/api/dispositivos', async (req, res, next) => {
   try {
-    const { q } = req.query;
+    const { q, tipo } = req.query;
     const db = await connectDB();
   const collection = db.collection('dispositivos');
   
@@ -56,49 +170,68 @@ app.get('/api/dispositivos', async (req, res, next) => {
       query = { placa: { $regex: q, $options: 'i' } };
     }
   }
+
+  // Agregar filtro de tipo si se especifica
+  if (tipo) {
+    query.dispositivo = tipo;
+  }
   
   const results = await collection.find(query).toArray();
   res.json(results);
   } catch (err) { next(err); }
 });
 
-// Obtener duplicados (placas o seriales repetidos)
-app.get('/api/duplicados', async (req, res, next) => {
+// Buscar Duplicados (Agrupación por placa o serial)
+app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
   try {
     const { campo, sede, tipo } = req.query; // campo: 'placa' o 'serial'
+    
+    if (!['placa', 'serial'].includes(campo)) {
+      return res.status(400).json({ error: 'Campo de duplicados inválido' });
+    }
+
     const db = await connectDB();
-  const collection = db.collection('dispositivos');
-  
-  const field = campo === 'serial' ? 'serial' : 'placa';
-  
-  const pipeline = [];
-  
-  // Agregar filtro de dispositivo si se especifica
-  if (tipo) {
-    pipeline.push({ $match: { dispositivo: { $regex: tipo, $options: 'i' } } });
-  }
+    const collection = db.collection('dispositivos');
 
-  pipeline.push(
-    {
-      $group: {
-        _id: `$${field}`,
-        count: { $sum: 1 },
-        docs: { $push: "$$ROOT" }
-      }
-    },
-    { $match: { count: { $gt: 1 }, _id: { $ne: null, $ne: "" } } }
-  );
+    // Valores genéricos que NO deben considerarse duplicados (comunes cuando no hay info)
+    const genericValues = [
+      "", null, "0", "N/A", "SIN SERIAL", "S/N", "SIN PLACA", "NONE", "NA", ".", "-"
+    ];
 
-  let results = await collection.aggregate(pipeline).toArray();
-  
-  // Filtrar por sede si se especifica
-  if (sede) {
-    results = results.filter(group => 
-      group.docs.some(doc => doc.sede === sede)
-    );
-  }
-  
-  res.json(results);
+    const pipeline = [
+      // 1. Filtrar documentos que tengan un valor válido (no vacío ni genérico)
+      { 
+        $match: { 
+          [campo]: { 
+            $exists: true, 
+            $nin: genericValues 
+          } 
+        } 
+      },
+      // 2. Si hay filtro por tipo, aplicarlo
+      ...(tipo ? [{ $match: { dispositivo: tipo } }] : []),
+      // 3. Agrupar por el campo placa/serial
+      {
+        $group: {
+          _id: `$${campo}`,
+          docs: { $push: "$$ROOT" },
+          count: { $sum: 1 }
+        }
+      },
+      // 4. Quedarse solo con los que aparecen más de una vez
+      { $match: { count: { $gt: 1 } } }
+    ];
+
+    let results = await collection.aggregate(pipeline).toArray();
+    
+    // Filtrar por sede si se especifica: El grupo debe contener al menos un doc en esa sede
+    if (sede) {
+      results = results.filter(group => 
+        group.docs.some(doc => doc.sede?.toLowerCase().includes(sede.toLowerCase()))
+      );
+    }
+
+    res.json(results);
   } catch (err) { next(err); }
 });
 
@@ -160,8 +293,82 @@ app.put('/api/dispositivos/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Exportar a Excel
-app.post('/api/exportar', async (req, res, next) => {
+// Exportar todo el inventario estructurado
+app.get('/api/exportar-total', authenticateToken, async (req, res, next) => {
+  try {
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+    
+    // Obtener todos los dispositivos ordenados por Institución, Sede y Aula
+    const dispositivos = await collection.find({})
+      .sort({ institucion: 1, sede: 1, aula: 1 })
+      .toArray();
+    
+    if (dispositivos.length === 0) {
+      return res.status(404).json({ error: 'No hay dispositivos para exportar' });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Inventario Total');
+    
+    worksheet.columns = [
+      { header: 'Institución', key: 'institucion', width: 35 },
+      { header: 'Sede', key: 'sede', width: 25 },
+      { header: 'Aula', key: 'aula', width: 20 },
+      { header: 'Dispositivo', key: 'dispositivo', width: 25 },
+      { header: 'Placa', key: 'placa', width: 15 },
+      { header: 'Serial', key: 'serial', width: 20 },
+      { header: 'Modelo', key: 'modelo', width: 15 },
+      { header: 'Notas', key: 'notas', width: 35 }
+    ];
+    
+    // Estilo para el encabezado
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4F46E5' } // Indigo color
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Agregar filas
+    worksheet.addRows(dispositivos);
+
+    // Auto-filtro para facilitar la lectura
+    worksheet.autoFilter = 'A1:H1';
+
+    // Formateo de celdas
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        // Bordes para facilitar la lectura de tablas
+        row.eachCell((cell) => {
+          cell.border = {
+            top: {style:'thin'},
+            left: {style:'thin'},
+            bottom: {style:'thin'},
+            right: {style:'thin'}
+          };
+        });
+      }
+    });
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=inventario_total_estructurado.xlsx'
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) { next(err); }
+});
+
+// Exportar selección a Excel
+app.post('/api/exportar', authenticateToken, async (req, res, next) => {
   try {
     const { dispositivos } = req.body;
     
@@ -170,7 +377,7 @@ app.post('/api/exportar', async (req, res, next) => {
     }
   
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Inventario');
+  const worksheet = workbook.addWorksheet('Inventario Seleccionado');
   
   worksheet.columns = [
     { header: 'Dispositivo', key: 'dispositivo', width: 20 },
@@ -199,7 +406,7 @@ app.post('/api/exportar', async (req, res, next) => {
   );
   res.setHeader(
     'Content-Disposition',
-    'attachment; filename=' + 'inventario_export.xlsx'
+    'attachment; filename=inventario_seleccion.xlsx'
   );
 
   await workbook.xlsx.write(res);

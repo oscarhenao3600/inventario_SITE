@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download } from 'lucide-react';
+import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download, LogOut, Lock, User } from 'lucide-react';
 
 const noSerialTypes = [
   "Servidor Portable de Aula SITE Sistema Cloud",
@@ -10,14 +10,22 @@ const noSerialTypes = [
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('search');
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [user, setUser] = useState(localStorage.getItem('user'));
+  const [role, setRole] = useState(localStorage.getItem('role'));
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [authForm, setAuthForm] = useState({ username: '', password: '' });
+  const [authError, setAuthError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [dispositivos, setDispositivos] = useState([]);
   const [duplicados, setDuplicados] = useState([]);
   const [filtroSede, setFiltroSede] = useState('');
+  const [appliedFiltroSede, setAppliedFiltroSede] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingDevice, setEditingDevice] = useState(null);
   const [dupField, setDupField] = useState('placa');
   const [filtroTipoDup, setFiltroTipoDup] = useState('');
+  const [appliedFiltroTipoDup, setAppliedFiltroTipoDup] = useState('');
   const [stats, setStats] = useState({ total: 0, totalSedes: 0, totalInstituciones: 0, totalDuplicadosPlaca: 0, totalDuplicadosSerial: 0 });
   const [showImportModal, setShowImportModal] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -27,6 +35,7 @@ const App = () => {
   // Advanced filters
   const [filtroInstitucion, setFiltroInstitucion] = useState('');
   const [filtroSedeSearch, setFiltroSedeSearch] = useState('');
+  const [filtroTipoSearch, setFiltroTipoSearch] = useState('');
   
   // Form State
   const [formData, setFormData] = useState({
@@ -34,10 +43,41 @@ const App = () => {
   });
   const [validationError, setValidationError] = useState('');
 
+  // Configurar Interceptor de Axios para incluir el Token
   useEffect(() => {
-    fetchStats();
-    fetchTipos();
-  }, []);
+    const interceptor = axios.interceptors.request.use(
+      (config) => {
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
+    // Interceptor para manejar errores 401/403 (token expirado)
+    const responseInterceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+          handleLogout();
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      axios.interceptors.request.eject(interceptor);
+      axios.interceptors.response.eject(responseInterceptor);
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (token) {
+      fetchStats();
+      fetchTipos();
+    }
+  }, [token]);
 
   const fetchTipos = async () => {
     try {
@@ -57,15 +97,19 @@ const App = () => {
     }
   };
 
+  // Deshabilitado auto-fetch al cambiar de pestaña para cumplir con requerimiento:
+  // "consulta de los duplicados se realice solo y unicamente cuando se de click en el boton consultar"
+  /*
   useEffect(() => {
     if (activeTab === 'dupes' && duplicados.length === 0) {
       fetchDuplicados();
     }
   }, [activeTab]);
+  */
 
   const handleSearch = async () => {
     try {
-      let url = `/api/dispositivos?q=${searchTerm}`;
+      let url = `/api/dispositivos?q=${searchTerm}&tipo=${filtroTipoSearch}`;
       const res = await axios.get(url);
       
       let filtered = res.data;
@@ -86,6 +130,9 @@ const App = () => {
     try {
       const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}`);
       setDuplicados(res.data);
+      // Aplicar filtros a la vista solo cuando se realiza la consulta
+      setAppliedFiltroSede(filtroSede);
+      setAppliedFiltroTipoDup(filtroTipoDup);
     } catch (err) {
       console.error("Error fetching duplicates", err);
     }
@@ -148,59 +195,197 @@ const App = () => {
 
   const exportToExcel = async (data = dispositivos) => {
     try {
-      const response = await axios.post('/api/exportar', { dispositivos: data }, { responseType: 'blob' });
+      const response = await axios.post('/api/exportar', { dispositivos: data }, { 
+        responseType: 'blob',
+        headers: { Authorization: `Bearer ${token}` }
+      });
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', 'inventario_export.xlsx');
+      link.setAttribute('download', 'inventario_seleccion.xlsx');
       document.body.appendChild(link);
       link.click();
     } catch (err) {
       console.error("Error exporting", err);
-      const msg = err.response?.data?.error || "Error al exportar a Excel. La lista podría ser demasiado grande.";
+      const msg = err.response?.data?.error || "Error al exportar a Excel.";
       alert(msg);
     }
   };
 
-  const handleImport = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('archivo', file);
-
-    setImporting(true);
-    setImportStats(null);
-
+  const handleExportTotal = async () => {
     try {
-      const res = await axios.post('/api/importar', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const response = await axios.get('/api/exportar-total', { 
+        responseType: 'blob',
+        headers: { Authorization: `Bearer ${token}` }
       });
-      setImportStats(res.data);
-      fetchStats();
-      fetchTipos();
-      if (activeTab === 'search') handleSearch();
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'inventario_total_estructurado.xlsx');
+      document.body.appendChild(link);
+      link.click();
     } catch (err) {
-      console.error("Error importing", err);
-      alert("Error al importar el archivo. Asegúrate de que sea un formato válido de Excel.");
-    } finally {
-      setImporting(false);
+      console.error("Error exporting total", err);
+      alert("Error al exportar todo el inventario.");
     }
   };
+
+  const handleExportAula = (aulaName, items) => {
+    // Recopilar todos los documentos del aula y sus duplicados
+    const docsToExport = [];
+    const seenIds = new Set();
+
+    items.forEach(item => {
+      // Agregar el dispositivo local
+      if (!seenIds.has(item.device._id)) {
+        docsToExport.push(item.device);
+        seenIds.add(item.device._id);
+      }
+      // Agregar sus duplicados externos
+      item.allDuplicates.forEach(dup => {
+        if (!seenIds.has(dup._id)) {
+          docsToExport.push(dup);
+          seenIds.add(dup._id);
+        }
+      });
+    });
+
+    exportToExcel(docsToExport);
+  };
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    try {
+      const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const res = await axios.post(endpoint, authForm);
+      
+      if (authMode === 'login') {
+        const { token, username, role } = res.data;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', username);
+        localStorage.setItem('role', role);
+        setToken(token);
+        setUser(username);
+        setRole(role);
+      } else {
+        alert("Registro exitoso. Ahora puedes iniciar sesión.");
+        setAuthMode('login');
+        setAuthForm({ username: '', password: '' });
+      }
+    } catch (err) {
+      setAuthError(err.response?.data?.error || "Error en la autenticación");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('role');
+    setToken(null);
+    setUser(null);
+    setRole(null);
+    setDispositivos([]);
+    setDuplicados([]);
+  };
+
+  if (!token) {
+    return (
+      <div className="container" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh'}}>
+        <div className="glass-card" style={{maxWidth: '400px', width: '100%', padding: '2.5rem'}}>
+          <div style={{textAlign: 'center', marginBottom: '2rem'}}>
+            <div style={{background: 'var(--accent)', width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem'}}>
+              <Lock size={30} color="white" />
+            </div>
+            <h2>Inventario Aulas Site</h2>
+            <p style={{color: 'var(--text-muted)'}}>{authMode === 'login' ? 'Inicia sesión para continuar' : 'Crea una cuenta nueva'}</p>
+          </div>
+
+          <form onSubmit={handleAuth}>
+            <div className="form-group">
+              <label>Usuario</label>
+              <div style={{position: 'relative'}}>
+                <User size={18} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5}} />
+                <input 
+                  required 
+                  style={{paddingLeft: '2.5rem'}}
+                  value={authForm.username} 
+                  onChange={e => setAuthForm({...authForm, username: e.target.value})} 
+                  placeholder="Tu usuario"
+                />
+              </div>
+            </div>
+            <div className="form-group" style={{marginTop: '1rem'}}>
+              <label>Contraseña</label>
+              <div style={{position: 'relative'}}>
+                <Lock size={18} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5}} />
+                <input 
+                  required 
+                  type="password"
+                  style={{paddingLeft: '2.5rem'}}
+                  value={authForm.password} 
+                  onChange={e => setAuthForm({...authForm, password: e.target.value})} 
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            {authError && (
+              <div style={{color: 'var(--danger)', marginTop: '1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                <AlertCircle size={16} /> {authError}
+              </div>
+            )}
+
+            <button type="submit" className="btn btn-primary" style={{width: '100%', marginTop: '2rem', height: '45px'}}>
+              {authMode === 'login' ? 'Entrar al Sistema' : 'Registrarse'}
+            </button>
+            
+            <div style={{textAlign: 'center', marginTop: '1.5rem', fontSize: '0.9rem'}}>
+              <span style={{color: 'var(--text-muted)'}}>
+                {authMode === 'login' ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?'}
+              </span>
+              <button 
+                type="button"
+                onClick={() => {setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError('');}}
+                style={{background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem'}}
+              >
+                {authMode === 'login' ? 'Regístrate aquí' : 'Inicia sesión'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container">
       <header>
-        <div>
-          <h1>Inventario Aulas Site</h1>
-          <p style={{color: 'var(--text-muted)'}}>Gestión y Visualización de Dispositivos</p>
+        <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+          <div style={{background: 'var(--accent)', padding: '0.5rem', borderRadius: '8px'}}>
+             <FileUp size={24} color="white" />
+          </div>
+          <div>
+            <h1>Inventario Aulas Site</h1>
+            <p style={{color: 'var(--text-muted)'}}>Bienvenido, <strong>{user}</strong></p>
+          </div>
         </div>
-        <div style={{display: 'flex', gap: '1rem'}}>
-          <button className="btn btn-outline" onClick={() => setShowImportModal(true)}>
-            <FileUp size={18} /> Importar Excel
-          </button>
-          <button className="btn btn-primary" onClick={() => openModal()}>
-            <Plus size={18} /> Nuevo Dispositivo
+        <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
+          {role === 'admin' && (
+            <>
+              <button className="btn btn-outline" onClick={handleExportTotal} title="Descargar todo el inventario agrupado">
+                <Download size={18} /> Exportar Todo
+              </button>
+              <button className="btn btn-outline" onClick={() => setShowImportModal(true)}>
+                <FileUp size={18} /> Importar
+              </button>
+              <button className="btn btn-primary" onClick={() => openModal()}>
+                <Plus size={18} /> Nuevo
+              </button>
+            </>
+          )}
+          <button className="btn btn-outline" style={{borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={handleLogout} title="Cerrar Sesión">
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -287,8 +472,22 @@ const App = () => {
                     onChange={(e) => setFiltroSedeSearch(e.target.value)}
                   />
                 </div>
+                <div style={{flex: 1, minWidth: '200px'}}>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Tipo de Dispositivo</label>
+                  <select 
+                    className="search-input" 
+                    style={{margin: 0, padding: '0.5rem', width: '100%', background: 'var(--bg-card)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}} 
+                    value={filtroTipoSearch}
+                    onChange={(e) => setFiltroTipoSearch(e.target.value)}
+                  >
+                    <option value="">Todos los tipos</option>
+                    {tiposDispositivo.map(tipo => (
+                      <option key={tipo} value={tipo}>{tipo}</option>
+                    ))}
+                  </select>
+                </div>
                 <div style={{display: 'flex', alignItems: 'flex-end'}}>
-                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setSearchTerm('');}}>
+                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroTipoSearch(''); setSearchTerm('');}}>
                     Limpiar Filtros
                   </button>
                 </div>
@@ -311,7 +510,7 @@ const App = () => {
                   <th>Dispositivo</th>
                   <th>Institución / Sede</th>
                   <th>Aula</th>
-                  <th>Acciones</th>
+                  {role === 'admin' && <th>Acciones</th>}
                 </tr>
               </thead>
               <tbody>
@@ -332,16 +531,18 @@ const App = () => {
                       <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{d.sede}</div>
                     </td>
                     <td>{d.aula}</td>
-                    <td>
-                      <div style={{display: 'flex', gap: '0.5rem'}}>
-                        <button className="btn btn-outline" style={{padding: '0.4rem'}} onClick={() => openModal(d)}>
-                          <Edit2 size={14} />
-                        </button>
-                        <button className="btn btn-outline" style={{padding: '0.4rem', borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={() => handleDelete(d._id)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+                    {role === 'admin' && (
+                      <td>
+                        <div style={{display: 'flex', gap: '0.5rem'}}>
+                          <button className="btn btn-outline" style={{padding: '0.4rem'}} onClick={() => openModal(d)}>
+                            <Edit2 size={14} />
+                          </button>
+                          <button className="btn btn-outline" style={{padding: '0.4rem', borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={() => handleDelete(d._id)}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -374,6 +575,7 @@ const App = () => {
                     placeholder="Ej: Sede Principal..." 
                     value={filtroSede}
                     onChange={(e) => setFiltroSede(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && fetchDuplicados()}
                   />
                 </div>
               </div>
@@ -384,6 +586,7 @@ const App = () => {
                   style={{margin: 0, padding: '0.5rem', width: '100%', background: 'var(--bg-card)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}} 
                   value={filtroTipoDup}
                   onChange={(e) => setFiltroTipoDup(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchDuplicados()}
                 >
                   <option value="">Todos los tipos</option>
                   {tiposDispositivo.map(tipo => (
@@ -395,7 +598,12 @@ const App = () => {
                 <button className="btn btn-primary" onClick={fetchDuplicados} style={{height: 'unset', padding: '0.6rem 2rem'}}>
                   Consultar Duplicados
                 </button>
-                <button className="btn btn-outline" onClick={() => {setFiltroSede(''); setFiltroTipoDup('');}}>
+                <button className="btn btn-outline" onClick={() => {
+                  setFiltroSede(''); 
+                  setFiltroTipoDup('');
+                  setAppliedFiltroSede('');
+                  setAppliedFiltroTipoDup('');
+                }}>
                   Limpiar
                 </button>
               </div>
@@ -405,7 +613,7 @@ const App = () => {
             </p>
           </div>
 
-          {dupField === 'serial' && noSerialTypes.includes(filtroTipoDup) && (
+          {dupField === 'serial' && noSerialTypes.includes(appliedFiltroTipoDup) && (
             <div style={{
               background: 'rgba(245, 158, 11, 0.1)', 
               borderLeft: '4px solid #f59e0b', 
@@ -425,65 +633,128 @@ const App = () => {
             </div>
           )}
 
-          {duplicados.map(group => (
-            <div className="glass-card" key={group._id} style={{marginBottom: '1rem', borderLeft: '4px solid var(--danger)'}}>
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
-                <h3 style={{color: 'var(--danger)'}}>Repetido: {group._id}</h3>
-                <span className="badge" style={{background: 'rgba(239, 68, 68, 0.2)', color: 'var(--danger)', padding: '0.2rem 0.5rem', borderRadius: '4px'}}>
-                   {group.count} veces
-                </span>
+          {/* Visualización agrupada por Aula con Exportación */}
+          {(() => {
+            const groupedByAula = {};
+            duplicados.forEach(group => {
+              group.docs.forEach(doc => {
+                if (!appliedFiltroSede || doc.sede?.toLowerCase().includes(appliedFiltroSede.toLowerCase())) {
+                  const aulaKey = doc.aula || 'Sin Aula';
+                  if (!groupedByAula[aulaKey]) groupedByAula[aulaKey] = [];
+                  
+                  groupedByAula[aulaKey].push({
+                    device: doc,
+                    duplicateId: group._id, 
+                    allDuplicates: group.docs.filter(d => d._id !== doc._id)
+                  });
+                }
+              });
+            });
+
+            const aulas = Object.keys(groupedByAula).sort();
+
+            if (aulas.length === 0) {
+              return <div style={{textAlign: 'center', padding: '3rem', opacity: 0.5}}>No se encontraron duplicados con los filtros actuales.</div>;
+            }
+
+            return aulas.map(aulaName => (
+              <div className="glass-card" key={aulaName} style={{marginBottom: '2.5rem', borderTop: '4px solid var(--accent)'}}>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem'}}>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.75rem'}}>
+                    <div style={{background: 'var(--accent)', padding: '0.4rem', borderRadius: '6px'}}>
+                      <Check size={18} color="white" />
+                    </div>
+                    <h3 style={{fontSize: '1.3rem'}}>Aula: {aulaName}</h3>
+                    <span className="badge" style={{background: 'rgba(255,255,255,0.1)', fontSize: '0.8rem'}}>
+                      {groupedByAula[aulaName].length} dispositivos con conflictos
+                    </span>
+                  </div>
+                  <button 
+                    className="btn btn-primary" 
+                    style={{fontSize: '0.85rem', padding: '0.5rem 1rem'}}
+                    onClick={() => handleExportAula(aulaName, groupedByAula[aulaName])}
+                  >
+                    <Download size={14} /> Exportar Reporte de esta Aula
+                  </button>
+                </div>
+
+                {groupedByAula[aulaName].map((item, idx) => (
+                  <div key={`${aulaName}-${idx}`} style={{
+                    background: 'rgba(255,255,255,0.02)', 
+                    borderRadius: '8px', 
+                    padding: '1.2rem', 
+                    marginBottom: '1.2rem',
+                    borderLeft: '4px solid var(--danger)'
+                  }}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'flex-start'}}>
+                      <div style={{display: 'flex', gap: '1.5rem', flexWrap: 'wrap'}}>
+                        <div>
+                          <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Equipo Local en Aula</div>
+                          <div style={{fontWeight: 'bold', fontSize: '1.2rem'}}>
+                            {item.device.dispositivo} - <span style={{color: 'var(--accent)'}}>{item.device.placa}</span>
+                          </div>
+                          <div style={{fontSize: '0.85rem', opacity: 0.9}}>Sede: {item.device.sede} | Aula: {item.device.aula}</div>
+                        </div>
+                        <div style={{borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '1.5rem'}}>
+                           <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase'}}>Identificación Recibida</div>
+                           <div style={{fontSize: '1rem', fontWeight: 'bold'}}>{item.device.serial || item.device.placa}</div>
+                        </div>
+                      </div>
+                      {role === 'admin' && (
+                        <button className="btn btn-outline" style={{padding: '0.5rem'}} onClick={() => openModal(item.device)} title="Editar Equipo Local">
+                          <Edit2 size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{marginTop: '1.5rem', background: 'rgba(239, 68, 68, 0.02)', borderRadius: '6px', padding: '0.75rem'}}>
+                      <div style={{fontSize: '0.75rem', color: '#f87171', fontWeight: '800', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.50rem'}}>
+                        <AlertCircle size={16} /> REGISTROS CONFLICTIVOS EN OTROS LUGARES ({item.allDuplicates.length})
+                      </div>
+                      <div style={{overflowX: 'auto'}}>
+                        <table style={{fontSize: '0.85rem', border: '1px solid rgba(239, 68, 68, 0.1)'}}>
+                          <thead>
+                            <tr style={{background: 'rgba(239, 68, 68, 0.1)'}}>
+                              <th>Institución / Sede</th>
+                              <th style={{textAlign: 'center'}}>Aula</th>
+                              <th style={{textAlign: 'center'}}>Placa / Serial</th>
+                              <th>Tipo</th>
+                              {role === 'admin' && <th style={{textAlign: 'center'}}>Acción</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {item.allDuplicates.map(dup => (
+                              <tr key={dup._id} style={{background: 'transparent', borderBottom: '1px solid rgba(255,255,255,0.05)'}}>
+                                <td style={{padding: '0.75rem'}}>
+                                  <div style={{fontWeight: '900', color: 'white', fontSize: '0.95rem'}}>{dup.institucion}</div>
+                                  <div style={{fontSize: '0.8rem', color: 'var(--accent)', fontWeight: '700'}}>{dup.sede}</div>
+                                </td>
+                                <td style={{textAlign: 'center', fontWeight: '900', fontSize: '1rem', color: 'white', background: 'rgba(255,255,255,0.05)'}}>
+                                  {dup.aula}
+                                </td>
+                                <td style={{textAlign: 'center'}}>
+                                  <div style={{color: 'var(--text-muted)', fontWeight: 'bold'}}>{dup.placa}</div>
+                                  <div style={{fontSize: '0.7rem', opacity: 0.6}}>{dup.serial}</div>
+                                </td>
+                                <td>{dup.dispositivo}</td>
+                                {role === 'admin' && (
+                                  <td style={{textAlign: 'center'}}>
+                                    <button className="btn btn-outline" style={{padding: '0.3rem'}} onClick={() => openModal(dup)} title="Editar Registro Remoto">
+                                      <Edit2 size={12} />
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Placa</th>
-                    <th>Serial</th>
-                    <th>Dispositivo</th>
-                    <th>Institución</th>
-                    <th>Sede</th>
-                    <th>Aula</th>
-                    <th>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.docs.map(doc => (
-                    <tr key={doc._id}>
-                      <td>
-                        <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-                          <span>{doc.placa}</span>
-                          {doc.notas && doc.notas.trim() !== '' && (
-                            <Check size={14} color="var(--success)" title="Revisado (con notas)" />
-                          )}
-                        </div>
-                      </td>
-                      <td>{doc.serial}</td>
-                      <td>{doc.dispositivo}</td>
-                      <td>{doc.institucion}</td>
-                      <td>{doc.sede}</td>
-                      <td>{doc.aula}</td>
-                      <td>
-                        <div style={{display: 'flex', gap: '0.5rem'}}>
-                          <button className="btn btn-outline" style={{padding: '0.4rem'}} onClick={() => openModal(doc)}>
-                            <Edit2 size={14} />
-                          </button>
-                          <button className="btn btn-outline" style={{padding: '0.4rem', borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={() => handleDelete(doc._id)}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <button 
-                className="btn btn-outline" 
-                style={{marginTop: '1rem', width: '100%', justifyContent: 'center'}}
-                onClick={() => exportToExcel(group.docs)}
-              >
-                <FileSpreadsheet size={14} /> Exportar estos para validación incitu
-              </button>
-            </div>
-          ))}
+            ));
+          })()}
         </section>
       )}
 
