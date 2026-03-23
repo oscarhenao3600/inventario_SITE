@@ -278,6 +278,52 @@ const App = () => {
     }
   };
 
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validar extensión
+    const fileExt = file.name.split('.').pop().toLowerCase();
+    if (fileExt !== 'xlsx') {
+      alert("Por favor, sube un archivo Excel (.xlsx)");
+      e.target.value = ''; // Limpiar input
+      return;
+    }
+
+    const confirmImport = window.confirm(`¿Estás seguro de importar el archivo "${file.name}"? Se actualizarán registros existentes y se insertarán los nuevos.`);
+    if (!confirmImport) {
+      e.target.value = '';
+      return;
+    }
+
+    setImporting(true);
+    setImportStats(null);
+
+    const formData = new FormData();
+    formData.append('archivo', file);
+
+    try {
+      // Nota: El interceptor de axios ya añade el Header Authorization
+      const res = await axios.post('/api/importar', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      setImportStats(res.data);
+      fetchStats();
+      fetchTipos();
+      if (activeTab === 'search' && searchTerm) handleSearch();
+    } catch (err) {
+      console.error("Error importing file", err);
+      const errorMsg = err.response?.data?.error || "Error al procesar el archivo Excel. Verifica el formato.";
+      alert(errorMsg);
+    } finally {
+      setImporting(false);
+      e.target.value = ''; // Limpiar para permitir subir el mismo archivo si es necesario
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
