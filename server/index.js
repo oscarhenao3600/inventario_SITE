@@ -29,10 +29,10 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 const uri = 'mongodb://localhost:27017';
 const client = new MongoClient(uri);
 const dbName = 'inventario_educativo';
-let db;
+let db; // Keep db as the global variable for the database instance
 
 async function connectDB() {
-  if (db) return db;
+  if (db) return db; // Use 'db' instead of 'cachedDb'
   try {
     await client.connect();
     console.log('Connected to MongoDB');
@@ -42,6 +42,22 @@ async function connectDB() {
     console.error('MongoDB connection error:', err);
     process.exit(1);
   }
+}
+
+async function syncInstitucion(db, nombre, sede) {
+  if (!nombre) return;
+  const coll = db.collection('instituciones');
+  const normalizedNombre = nombre.trim().toUpperCase();
+  const normalizedSede = sede?.trim().toUpperCase();
+  
+  await coll.updateOne(
+    { nombre: normalizedNombre },
+    { 
+      $set: { nombre: normalizedNombre },
+      ...(normalizedSede ? { $addToSet: { sedes: normalizedSede } } : {})
+    },
+    { upsert: true }
+  );
 }
 
 // Inicializar conexión al arrancar
@@ -273,8 +289,9 @@ app.post('/api/dispositivos', async (req, res, next) => {
   try {
     const db = await connectDB();
   const collection = db.collection('dispositivos');
-  const result = await collection.insertOne(req.body);
-  res.json(result);
+    const result = await collection.insertOne(req.body);
+    await syncInstitucion(db, req.body.institucion, req.body.sede);
+    res.status(201).json(result);
   } catch (err) { next(err); }
 });
 
@@ -284,12 +301,10 @@ app.put('/api/dispositivos/:id', async (req, res, next) => {
     const { id } = req.params;
     const db = await connectDB();
   const collection = db.collection('dispositivos');
-  const { _id, ...updateData } = req.body;
-  const result = await collection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: updateData }
-  );
-  res.json(result);
+    const { _id, ...updateData } = req.body;
+    const result = await collection.updateOne({ _id: new ObjectId(id) }, { $set: updateData });
+    await syncInstitucion(db, updateData.institucion, updateData.sede);
+    res.json(result);
   } catch (err) { next(err); }
 });
 
@@ -469,6 +484,8 @@ app.post('/api/importar', upload.single('archivo'), async (req, res) => {
           await collection.insertOne(data);
           inserts++;
         }
+        
+        await syncInstitucion(db, data.institucion, data.sede);
         rowCount++;
       } catch (err) {
         console.error('Error procesando fila:', err);
@@ -509,9 +526,9 @@ app.delete('/api/dispositivos/:id', async (req, res, next) => {
 app.get('/api/tipos', async (req, res, next) => {
   try {
     const db = await connectDB();
-  const collection = db.collection('dispositivos');
-  const tipos = await collection.distinct('dispositivo');
-  res.json(tipos.filter(t => t && t.trim() !== ''));
+    const collection = db.collection('dispositivos');
+    const tipos = await collection.distinct('dispositivo');
+    res.json(tipos.filter(t => typeof t === 'string' && t.trim() !== ''));
   } catch (err) { next(err); }
 });
 
@@ -519,37 +536,44 @@ app.get('/api/tipos', async (req, res, next) => {
 app.get('/api/stats', async (req, res, next) => {
   try {
     const db = await connectDB();
-  const collection = db.collection('dispositivos');
+    const collection = db.collection('dispositivos');
+    const institucionesColl = db.collection('instituciones');
+    
+    const total = await collection.countDocuments();
+    const institucionesList = await institucionesColl.find().toArray();
+    
+    const sedesUnicas = new Set();
+    const instNames = [];
+    
+    institucionesList.forEach(inst => {
+      instNames.push(inst.nombre);
+      if (inst.sedes) {
+        inst.sedes.forEach(s => sedesUnicas.add(s));
+      }
+    });
   
-  const total = await collection.countDocuments();
-  const sedes = await collection.distinct('sede');
-  const instituciones = await collection.distinct('institucion');
+    // Contar duplicados aproximados
+    const totalDuplicadosPlaca = (await collection.aggregate([
+      { $group: { _id: "$placa", count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 }, _id: { $ne: null, $ne: "" } } },
+      { $count: "total" }
+    ]).toArray())[0]?.total || 0;
   
-  // Contar duplicados aproximados de placa
-  const dupPipeline = [
-    { $group: { _id: "$placa", count: { $sum: 1 } } },
-    { $match: { count: { $gt: 1 }, _id: { $ne: null, $ne: "" } } },
-    { $count: "total" }
-  ];
-  const dupResult = await collection.aggregate(dupPipeline).toArray();
-  const totalDuplicadosPlaca = dupResult.length > 0 ? dupResult[0].total : 0;
-
-  // Contar duplicados aproximados de serial
-  const dupSerialPipeline = [
-    { $group: { _id: "$serial", count: { $sum: 1 } } },
-    { $match: { count: { $gt: 1 }, _id: { $ne: null, $ne: "" } } },
-    { $count: "total" }
-  ];
-  const dupSerialResult = await collection.aggregate(dupSerialPipeline).toArray();
-  const totalDuplicadosSerial = dupSerialResult.length > 0 ? dupSerialResult[0].total : 0;
-
-  res.json({
-    total,
-    totalSedes: sedes.length,
-    totalInstituciones: instituciones.length,
-    totalDuplicadosPlaca,
-    totalDuplicadosSerial
-  });
+    const totalDuplicadosSerial = (await collection.aggregate([
+      { $group: { _id: "$serial", count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 }, _id: { $ne: null, $ne: "" } } },
+      { $count: "total" }
+    ]).toArray())[0]?.total || 0;
+  
+    res.json({
+      total,
+      totalSedes: sedesUnicas.size,
+      totalInstituciones: institucionesList.length,
+      totalDuplicadosPlaca,
+      totalDuplicadosSerial,
+      sedes: Array.from(sedesUnicas).sort(),
+      instituciones: instNames.sort()
+    });
   } catch (err) { next(err); }
 });
 

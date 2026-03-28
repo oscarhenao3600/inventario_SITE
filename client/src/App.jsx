@@ -26,7 +26,15 @@ const App = () => {
   const [dupField, setDupField] = useState('placa');
   const [filtroTipoDup, setFiltroTipoDup] = useState('');
   const [appliedFiltroTipoDup, setAppliedFiltroTipoDup] = useState('');
-  const [stats, setStats] = useState({ total: 0, totalSedes: 0, totalInstituciones: 0, totalDuplicadosPlaca: 0, totalDuplicadosSerial: 0 });
+  const [stats, setStats] = useState({ 
+    total: 0, 
+    totalSedes: 0, 
+    totalInstituciones: 0, 
+    totalDuplicadosPlaca: 0, 
+    totalDuplicadosSerial: 0,
+    sedes: [],
+    instituciones: []
+  });
   const [showImportModal, setShowImportModal] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importStats, setImportStats] = useState(null);
@@ -97,16 +105,6 @@ const App = () => {
     }
   };
 
-  // Deshabilitado auto-fetch al cambiar de pestaña para cumplir con requerimiento:
-  // "consulta de los duplicados se realice solo y unicamente cuando se de click en el boton consultar"
-  /*
-  useEffect(() => {
-    if (activeTab === 'dupes' && duplicados.length === 0) {
-      fetchDuplicados();
-    }
-  }, [activeTab]);
-  */
-
   const handleSearch = async () => {
     try {
       let url = `/api/dispositivos?q=${searchTerm}&tipo=${filtroTipoSearch}`;
@@ -114,10 +112,10 @@ const App = () => {
       
       let filtered = res.data;
       if (filtroInstitucion) {
-        filtered = filtered.filter(d => d.institucion?.toLowerCase().includes(filtroInstitucion.toLowerCase()));
+        filtered = filtered.filter(d => d.institucion?.toLowerCase() === filtroInstitucion.toLowerCase());
       }
       if (filtroSedeSearch) {
-        filtered = filtered.filter(d => d.sede?.toLowerCase().includes(filtroSedeSearch.toLowerCase()));
+        filtered = filtered.filter(d => d.sede?.toLowerCase() === filtroSedeSearch.toLowerCase());
       }
       
       setDispositivos(filtered);
@@ -502,20 +500,22 @@ const App = () => {
                   <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Institución</label>
                   <input 
                     className="search-input" 
+                    list="instituciones-list"
                     style={{margin: 0, padding: '0.5rem'}} 
                     placeholder="Ej: I.E Santa Maria..."
                     value={filtroInstitucion}
-                    onChange={(e) => setFiltroInstitucion(e.target.value)}
+                    onChange={(e) => setFiltroInstitucion(e.target.value.toUpperCase())}
                   />
                 </div>
                 <div style={{flex: 1, minWidth: '200px'}}>
                   <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Sede</label>
                   <input 
                     className="search-input" 
+                    list="sedes-list"
                     style={{margin: 0, padding: '0.5rem'}} 
                     placeholder="Ej: Sede Principal..."
                     value={filtroSedeSearch}
-                    onChange={(e) => setFiltroSedeSearch(e.target.value)}
+                    onChange={(e) => setFiltroSedeSearch(e.target.value.toUpperCase())}
                   />
                 </div>
                 <div style={{flex: 1, minWidth: '200px'}}>
@@ -617,10 +617,11 @@ const App = () => {
                   <input 
                     type="text" 
                     className="search-input" 
+                    list="sedes-list"
                     style={{marginBottom: 0, padding: '0.5rem 1rem 0.5rem 2.5rem', width: '100%'}}
                     placeholder="Ej: Sede Principal..." 
                     value={filtroSede}
-                    onChange={(e) => setFiltroSede(e.target.value)}
+                    onChange={(e) => setFiltroSede(e.target.value.toUpperCase())}
                     onKeyDown={(e) => e.key === 'Enter' && fetchDuplicados()}
                   />
                 </div>
@@ -836,8 +837,7 @@ const App = () => {
                 <label>Tipo de Dispositivo</label>
                 <select 
                   value={formData.dispositivo} 
-                  onChange={e => setFormData({...formData, dispositivo: e.target.value})}
-                  style={{width: '100%', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}}
+                  onChange={e => setFormData({...formData, dispositivo: e.target.value})} 
                 >
                   <option value="">Seleccione un tipo...</option>
                   {tiposDispositivo.map(tipo => (
@@ -856,13 +856,21 @@ const App = () => {
 
               <div className="form-group">
                 <label>Institución Educativa</label>
-                <input value={formData.institucion} onChange={e => setFormData({...formData, institucion: e.target.value})} />
+                <input 
+                  list="instituciones-list" 
+                  value={formData.institucion} 
+                  onChange={e => setFormData({...formData, institucion: e.target.value.toUpperCase()})} 
+                />
               </div>
 
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem'}}>
                 <div className="form-group">
                   <label>Sede</label>
-                  <input value={formData.sede} onChange={e => setFormData({...formData, sede: e.target.value})} />
+                  <input 
+                    list="sedes-list" 
+                    value={formData.sede} 
+                    onChange={e => setFormData({...formData, sede: e.target.value.toUpperCase()})} 
+                  />
                 </div>
                 <div className="form-group">
                   <label>Aula</label>
@@ -983,6 +991,16 @@ const App = () => {
           </div>
         </div>
       )}
+      <datalist id="instituciones-list">
+        {stats.instituciones?.map(inst => (
+          <option key={inst} value={inst} />
+        ))}
+      </datalist>
+      <datalist id="sedes-list">
+        {stats.sedes?.map(sede => (
+          <option key={sede} value={sede} />
+        ))}
+      </datalist>
     </div>
   );
 };

@@ -43,6 +43,7 @@ h1 {
   font-weight: 800;
   background: linear-gradient(to right, #6366f1, #22d3ee);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -163,12 +164,17 @@ tr:hover {
 
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; margin-bottom: 0.5rem; color: var(--text-muted); }
-.form-group input, .form-group textarea {
+.form-group input, .form-group textarea, .form-group select {
   width: 100%;
   padding: 0.75rem;
   border-radius: 0.5rem;
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(15, 23, 42, 0.8); /* Slightly more opaque for better visibility */
   border: 1px solid var(--border);
+  color: white;
+}
+
+select option {
+  background-color: #1e293b;
   color: white;
 }
 
