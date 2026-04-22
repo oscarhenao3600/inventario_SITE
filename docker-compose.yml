@@ -1,0 +1,72 @@
+# --- ORQUESTACIÓN DE CONTENEDORES (DOCKER COMPOSE) ---
+
+version: '3.8'
+
+services:
+  # BASE DE DATOS (MongoDB)
+  mongo:
+    image: mongo:latest
+    container_name: inventario_db
+    restart: always
+    environment:
+      # Si quieres usar autenticación de Mongo, puedes añadir variables aquí
+      - MONGO_INITDB_DATABASE=inventario_educativo
+    ports:
+      # PUERTO DE LA BASE DE DATOS
+      # Formato: [Puerto_Externo_Host]:[Puerto_Interno_Contenedor]
+      # Cambia '27017' (el de la izquierda) si quieres acceder a la BD desde afuera en otro puerto.
+      - "27017:27017"
+    volumes:
+      # Persistencia de datos de la base de datos
+      - mongo_data:/data/db
+    networks:
+      - inventario_net
+
+  # SERVIDOR (Backend Node.js)
+  server:
+    build: ./server
+    container_name: inventario_server
+    restart: always
+    environment:
+      # Variable que usa el código para conectarse a Mongo
+      # El host es 'mongo' porque es el nombre del servicio arriba
+      - MONGODB_URI=mongodb://mongo:27017/inventario_educativo
+      - DB_NAME=inventario_educativo
+      - PORT=3001
+      - JWT_SECRET=una_clave_secreta_muy_larga_y_segura
+    ports:
+      # Mapeo del puerto del backend
+      - "3001:3001"
+    volumes:
+      # Persistencia de las imágenes/archivos subidos
+      - server_uploads:/app/uploads
+    depends_on:
+      - mongo
+    networks:
+      - inventario_net
+
+  # CLIENTE (Frontend Nginx)
+  client:
+    build: ./client
+    container_name: inventario_client
+    restart: always
+    ports:
+      # PUERTO DE DESPLIEGUE HTTP (PUERTO 80)
+      # Formato: [Puerto_Externo_Accesible_Navegador]:[Puerto_Interno_Nginx]
+      # Si quieres cambiar el puerto donde abres la web (ej: http://localhost:8080), 
+      # cambia el '80' de la izquierda por '8080'.
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - inventario_net
+
+# DEFINICIÓN DE VOLÚMENES PARA PERSISTENCIA
+volumes:
+  mongo_data:
+  server_uploads:
+
+# RED INTERNA
+networks:
+  inventario_net:
+    driver: bridge

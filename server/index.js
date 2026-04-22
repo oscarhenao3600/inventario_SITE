@@ -8,7 +8,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
 
-const JWT_SECRET = 'your-secret-key-change-this-in-production'; // Recomendado: usar variables de entorno
+// --- CONFIGURACIÓN DE VARIABLES DE ENTORNO ---
+// Puedes cambiar el JWT_SECRET en el archivo .env o aquí directamente
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
 const uploadDir = 'uploads/';
 if (!fs.existsSync(uploadDir)) {
@@ -17,7 +19,10 @@ if (!fs.existsSync(uploadDir)) {
 const upload = multer({ dest: uploadDir });
 
 const app = express();
-const port = 3001;
+
+// PUERTO DE LA APLICACIÓN (BACKEND)
+// Para cambiar el puerto donde escucha el servidor, modifica process.env.PORT o el valor 3001 aquí
+const port = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(helmet({
@@ -26,9 +31,12 @@ app.use(helmet({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-const uri = 'mongodb://localhost:27017';
+// CONEXIÓN A MONGODB
+// Para cambiar la dirección de la base de datos, modifica process.env.MONGODB_URI
+// Si usas Docker Compose, el host suele ser el nombre del servicio (ej: 'mongo')
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const client = new MongoClient(uri);
-const dbName = 'inventario_educativo';
+const dbName = process.env.DB_NAME || 'inventario_educativo';
 let db; // Keep db as the global variable for the database instance
 
 async function connectDB() {
