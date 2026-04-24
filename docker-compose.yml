@@ -9,13 +9,13 @@ services:
     container_name: inventario_db
     restart: always
     environment:
-      # Si quieres usar autenticación de Mongo, puedes añadir variables aquí
-      - MONGO_INITDB_DATABASE=inventario_educativo
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=${DB_NAME}
     ports:
-      # PUERTO DE LA BASE DE DATOS
-      # Formato: [Puerto_Externo_Host]:[Puerto_Interno_Contenedor]
-      # Cambia '27017' (el de la izquierda) si quieres acceder a la BD desde afuera en otro puerto.
-      - "27017:27017"
+      # Ya no usamos 27017 directamente al exterior. 
+      # Usamos un puerto alternativo definido en .env para Compass.
+      - "${MONGO_EXTERNAL_PORT}:27017"
     volumes:
       # Persistencia de datos de la base de datos
       - mongo_data:/data/db
@@ -28,17 +28,14 @@ services:
     container_name: inventario_server
     restart: always
     environment:
-      # Variable que usa el código para conectarse a Mongo
-      # El host es 'mongo' porque es el nombre del servicio arriba
-      - MONGODB_URI=mongodb://mongo:27017/inventario_educativo
-      - DB_NAME=inventario_educativo
-      - PORT=3001
-      - JWT_SECRET=una_clave_secreta_muy_larga_y_segura
+      # Usamos la URI con autenticación definida en el .env
+      - MONGODB_URI=${MONGODB_URI}
+      - DB_NAME=${DB_NAME}
+      - PORT=${PORT}
+      - JWT_SECRET=${JWT_SECRET}
     ports:
-      # Mapeo del puerto del backend
-      - "3001:3001"
+      - "${PORT}:${PORT}"
     volumes:
-      # Persistencia de las imágenes/archivos subidos
       - server_uploads:/app/uploads
     depends_on:
       - mongo
