@@ -208,7 +208,7 @@ app.get('/api/dispositivos', async (req, res, next) => {
 // Buscar Duplicados (Agrupación por placa o serial)
 app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
   try {
-    const { campo, sede, tipo } = req.query; // campo: 'placa' o 'serial'
+    const { campo, sede, tipo, aula } = req.query; // campo: 'placa' o 'serial'
     
     if (!['placa', 'serial'].includes(campo)) {
       return res.status(400).json({ error: 'Campo de duplicados inválido' });
@@ -255,7 +255,26 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
       );
     }
 
+    // Filtrar por aula si se especifica
+    if (aula) {
+      results = results.filter(group => 
+        group.docs.some(doc => doc.aula?.toLowerCase().includes(aula.toLowerCase()))
+      );
+    }
+
     res.json(results);
+  } catch (err) { next(err); }
+});
+
+// Obtener aulas únicas, opcionalmente filtradas por sede
+app.get('/api/aulas', authenticateToken, async (req, res, next) => {
+  try {
+    const { sede } = req.query;
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+    const query = sede ? { sede: { $regex: new RegExp(`^${sede}$`, 'i') } } : {};
+    const aulas = await collection.distinct('aula', query);
+    res.json(aulas.filter(a => typeof a === 'string' && a.trim() !== '').sort());
   } catch (err) { next(err); }
 });
 

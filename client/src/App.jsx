@@ -43,7 +43,13 @@ const App = () => {
   // Advanced filters
   const [filtroInstitucion, setFiltroInstitucion] = useState('');
   const [filtroSedeSearch, setFiltroSedeSearch] = useState('');
+  const [filtroAulaSearch, setFiltroAulaSearch] = useState('');
   const [filtroTipoSearch, setFiltroTipoSearch] = useState('');
+  
+  const [aulasSearch, setAulasSearch] = useState([]);
+  const [aulasDup, setAulasDup] = useState([]);
+  const [filtroAulaDup, setFiltroAulaDup] = useState('');
+  const [appliedFiltroAulaDup, setAppliedFiltroAulaDup] = useState('');
   
   // Form State
   const [formData, setFormData] = useState({
@@ -87,6 +93,30 @@ const App = () => {
     }
   }, [token]);
 
+  useEffect(() => {
+    if (token) {
+      const fetchAulas = async () => {
+        try {
+          const res = await axios.get(`/api/aulas${filtroSedeSearch ? `?sede=${encodeURIComponent(filtroSedeSearch)}` : ''}`);
+          setAulasSearch(res.data);
+        } catch (err) { console.error("Error fetching aulas search", err); }
+      };
+      fetchAulas();
+    }
+  }, [filtroSedeSearch, token]);
+
+  useEffect(() => {
+    if (token) {
+      const fetchAulas = async () => {
+        try {
+          const res = await axios.get(`/api/aulas${filtroSede ? `?sede=${encodeURIComponent(filtroSede)}` : ''}`);
+          setAulasDup(res.data);
+        } catch (err) { console.error("Error fetching aulas dup", err); }
+      };
+      fetchAulas();
+    }
+  }, [filtroSede, token]);
+
   const fetchTipos = async () => {
     try {
       const res = await axios.get('/api/tipos');
@@ -117,6 +147,9 @@ const App = () => {
       if (filtroSedeSearch) {
         filtered = filtered.filter(d => d.sede?.toLowerCase() === filtroSedeSearch.toLowerCase());
       }
+      if (filtroAulaSearch) {
+        filtered = filtered.filter(d => d.aula?.toLowerCase() === filtroAulaSearch.toLowerCase());
+      }
       
       setDispositivos(filtered);
     } catch (err) {
@@ -126,11 +159,12 @@ const App = () => {
 
   const fetchDuplicados = async () => {
     try {
-      const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}`);
+      const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}&aula=${filtroAulaDup}`);
       setDuplicados(res.data);
       // Aplicar filtros a la vista solo cuando se realiza la consulta
       setAppliedFiltroSede(filtroSede);
       setAppliedFiltroTipoDup(filtroTipoDup);
+      setAppliedFiltroAulaDup(filtroAulaDup);
     } catch (err) {
       console.error("Error fetching duplicates", err);
     }
@@ -519,6 +553,17 @@ const App = () => {
                   />
                 </div>
                 <div style={{flex: 1, minWidth: '200px'}}>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Aula</label>
+                  <input 
+                    className="search-input" 
+                    list="aulas-search-list"
+                    style={{margin: 0, padding: '0.5rem'}} 
+                    placeholder="Ej: Sistemas 1..."
+                    value={filtroAulaSearch}
+                    onChange={(e) => setFiltroAulaSearch(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <div style={{flex: 1, minWidth: '200px'}}>
                   <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Tipo de Dispositivo</label>
                   <select 
                     className="search-input" 
@@ -533,12 +578,35 @@ const App = () => {
                   </select>
                 </div>
                 <div style={{display: 'flex', alignItems: 'flex-end'}}>
-                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroTipoSearch(''); setSearchTerm('');}}>
+                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroAulaSearch(''); setFiltroTipoSearch(''); setSearchTerm('');}}>
                     Limpiar Filtros
                   </button>
                 </div>
              </div>
           </div>
+
+          {(filtroInstitucion || filtroSedeSearch) && dispositivos.length > 0 && (
+            <div className="glass-card" style={{padding: '1.5rem', marginBottom: '1.5rem', borderLeft: '4px solid var(--accent)', background: 'rgba(0,0,0,0.2)'}}>
+              <h4 style={{marginBottom: '1rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                <PieChart size={18} color="var(--accent)" />
+                Resumen de Equipos {filtroSedeSearch ? `en Sede: ${filtroSedeSearch}` : `en Institución: ${filtroInstitucion}`}
+              </h4>
+              <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap'}}>
+                {Object.entries(
+                  dispositivos.reduce((acc, d) => {
+                    const tipo = d.dispositivo || 'Desconocido';
+                    acc[tipo] = (acc[tipo] || 0) + 1;
+                    return acc;
+                  }, {})
+                ).sort((a, b) => b[1] - a[1]).map(([tipo, count]) => (
+                  <div key={tipo} style={{background: 'rgba(255,255,255,0.03)', padding: '0.75rem 1rem', borderRadius: '8px', flex: '1 1 200px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid rgba(255,255,255,0.05)'}}>
+                    <span style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>{tipo}</span>
+                    <span style={{fontWeight: 'bold', color: 'white', fontSize: '1.2rem', background: 'rgba(79, 70, 229, 0.2)', padding: '0.2rem 0.6rem', borderRadius: '4px'}}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
             <h3 style={{color: 'var(--text-muted)'}}>{dispositivos.length} resultados encontrados</h3>
@@ -627,6 +695,22 @@ const App = () => {
                 </div>
               </div>
               <div style={{flex: 1, minWidth: '200px'}}>
+                <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Aula</label>
+                <div style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
+                  <Filter size={18} color="var(--text-muted)" style={{position: 'absolute', left: '10px'}} />
+                  <input 
+                    type="text" 
+                    className="search-input" 
+                    list="aulas-dup-list"
+                    style={{marginBottom: 0, padding: '0.5rem 1rem 0.5rem 2.5rem', width: '100%'}}
+                    placeholder="Ej: Sistemas 1..." 
+                    value={filtroAulaDup}
+                    onChange={(e) => setFiltroAulaDup(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && fetchDuplicados()}
+                  />
+                </div>
+              </div>
+              <div style={{flex: 1, minWidth: '200px'}}>
                 <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Tipo de Dispositivo</label>
                 <select 
                   className="search-input" 
@@ -648,8 +732,10 @@ const App = () => {
                 <button className="btn btn-outline" onClick={() => {
                   setFiltroSede(''); 
                   setFiltroTipoDup('');
+                  setFiltroAulaDup('');
                   setAppliedFiltroSede('');
                   setAppliedFiltroTipoDup('');
+                  setAppliedFiltroAulaDup('');
                 }}>
                   Limpiar
                 </button>
@@ -685,7 +771,9 @@ const App = () => {
             const groupedByAula = {};
             duplicados.forEach(group => {
               group.docs.forEach(doc => {
-                if (!appliedFiltroSede || doc.sede?.toLowerCase().includes(appliedFiltroSede.toLowerCase())) {
+                const matchSede = !appliedFiltroSede || doc.sede?.toLowerCase().includes(appliedFiltroSede.toLowerCase());
+                const matchAula = !appliedFiltroAulaDup || doc.aula?.toLowerCase().includes(appliedFiltroAulaDup.toLowerCase());
+                if (matchSede && matchAula) {
                   const aulaKey = doc.aula || 'Sin Aula';
                   if (!groupedByAula[aulaKey]) groupedByAula[aulaKey] = [];
                   
@@ -999,6 +1087,16 @@ const App = () => {
       <datalist id="sedes-list">
         {stats.sedes?.map(sede => (
           <option key={sede} value={sede} />
+        ))}
+      </datalist>
+      <datalist id="aulas-search-list">
+        {aulasSearch?.map(aula => (
+          <option key={aula} value={aula} />
+        ))}
+      </datalist>
+      <datalist id="aulas-dup-list">
+        {aulasDup?.map(aula => (
+          <option key={aula} value={aula} />
         ))}
       </datalist>
     </div>
