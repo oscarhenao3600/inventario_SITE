@@ -229,20 +229,42 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
     ];
 
     const pipeline = [
-      // 1. Si includeGeneric es false, filtramos los valores genéricos de entrada
-      // Si es true, permitimos que pasen para agruparlos
-      ...(req.query.includeGeneric !== 'true' 
-        ? [{ $match: { [campo]: { $exists: true, $nin: genericValues } } }] 
-        : []
-      ),
+      // 1. Filtrado inicial
+      {
+        $match: {
+          $and: [
+            // Siempre necesitamos que el campo exista
+            { [campo]: { $exists: true } },
+            // Si includeGeneric es false, quitamos todos los genéricos
+            ...(req.query.includeGeneric !== 'true' 
+              ? [{ [campo]: { $nin: genericValues } }] 
+              : []
+            ),
+            // EXCLUSIÓN CRÍTICA: Si es búsqueda por serial, quitar Soportes/Carros que tengan serial genérico
+            // (Ya que es normal que no tengan serial, no deben ensuciar los resultados)
+            ...(campo === 'serial' 
+              ? [{
+                  $nor: [
+                    { 
+                      dispositivo: { $regex: /^(Carro Cargador de Tabletas|Soporte Electrónico Pantalla Interactiva Táctil|Servidor Portable de Aula SITE Sistema Cloud)$/i },
+                      $or: [
+                        { [campo]: { $in: genericValues } },
+                        { [campo]: { $exists: false } }
+                      ]
+                    }
+                  ]
+                }]
+              : []
+            )
+          ]
+        }
+      },
       // 2. Si hay filtro por tipo, aplicarlo
       ...(tipo ? [{ $match: { dispositivo: tipo } }] : []),
       // 3. Normalizar el campo para la agrupación (manejar null/empty)
       {
         $project: {
-          ...Object.fromEntries(Object.keys({
-            _id:1, dispositivo:1, aula:1, placa:1, serial:1, institucion:1, sede:1, modelo:1, notas:1
-          }).map(k => [k, `$${k}`])),
+          dispositivo: 1, aula: 1, placa: 1, serial: 1, institucion: 1, sede: 1, modelo: 1, notas: 1,
           normCampo: { $ifNull: [ { $cond: [ { $eq: [`$${campo}`, ""] }, null, `$${campo}` ] }, "SIN DATO" ] }
         }
       },
@@ -260,21 +282,16 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
     
     // 5. Filtrado manual de grupos para determinar qué es un "conflicto"
     results = results.filter(group => {
-      const isValGeneric = group._id === "SIN DATO" || genericValues.includes(group._id?.toString().toUpperCase().trim());
+      const groupVal = group._id?.toString().toUpperCase().trim();
+      const isValGeneric = group._id === "SIN DATO" || genericValues.includes(groupVal);
       
       if (!isValGeneric) {
-        // Si no es genérico, es conflicto solo si hay más de uno (duplicado real)
+        // Duplicado real: conflicto si hay más de uno
         return group.count > 1;
       } else {
-        // Si es genérico (N/A, SIN DATO, etc.)
-        // Solo es conflicto si se solicitó incluir genéricos Y contiene al menos un equipo que SÍ debería tener serial
-        if (req.query.includeGeneric !== 'true') return false;
-        
-        // Si es búsqueda por PLACA, los genéricos siempre son conflictos si count > 1
-        if (campo === 'placa') return group.count > 1;
-
-        // Si es búsqueda por SERIAL, verificamos si hay algún equipo que NO sea de los exceptuados
-        return group.docs.some(doc => !noSerialTypes.includes(doc.dispositivo));
+        // Valor genérico/faltante: solo si se solicitó incluirlos
+        // El pipeline ya filtró los equipos que NO requieren serial (Soportes/Carros)
+        return req.query.includeGeneric === 'true';
       }
     });
     
