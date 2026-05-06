@@ -8,6 +8,12 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
 
+const noSerialTypes = [
+  "Servidor Portable de Aula SITE Sistema Cloud",
+  "Soporte Electrónico Pantalla Interactiva Táctil",
+  "Carro Cargador de Tabletas"
+];
+
 // --- CONFIGURACIÓN DE VARIABLES DE ENTORNO ---
 // Puedes cambiar el JWT_SECRET en el archivo .env o aquí directamente
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
@@ -219,36 +225,60 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
 
     // Valores genéricos que NO deben considerarse duplicados (comunes cuando no hay info)
     const genericValues = [
-      "", null, "0", "N/A", "SIN SERIAL", "S/N", "SIN PLACA", "NONE", "NA", ".", "-"
+      "", null, "0", "N/A", "SIN SERIAL", "S/N", "SIN PLACA", "NONE", "NA", ".", "-", "PENDIENTE", "PENDIENTES"
     ];
 
     const pipeline = [
-      // 1. Filtrar documentos que tengan un valor válido (no vacío ni genérico)
-      { 
-        $match: { 
-          [campo]: { 
-            $exists: true, 
-            $nin: genericValues 
-          } 
-        } 
-      },
+      // 1. Si includeGeneric es false, filtramos los valores genéricos de entrada
+      // Si es true, permitimos que pasen para agruparlos
+      ...(req.query.includeGeneric !== 'true' 
+        ? [{ $match: { [campo]: { $exists: true, $nin: genericValues } } }] 
+        : []
+      ),
       // 2. Si hay filtro por tipo, aplicarlo
       ...(tipo ? [{ $match: { dispositivo: tipo } }] : []),
-      // 3. Agrupar por el campo placa/serial
+      // 3. Normalizar el campo para la agrupación (manejar null/empty)
+      {
+        $project: {
+          ...Object.fromEntries(Object.keys({
+            _id:1, dispositivo:1, aula:1, placa:1, serial:1, institucion:1, sede:1, modelo:1, notas:1
+          }).map(k => [k, `$${k}`])),
+          normCampo: { $ifNull: [ { $cond: [ { $eq: [`$${campo}`, ""] }, null, `$${campo}` ] }, "SIN DATO" ] }
+        }
+      },
+      // 4. Agrupar por el valor normalizado
       {
         $group: {
-          _id: `$${campo}`,
+          _id: "$normCampo",
           docs: { $push: "$$ROOT" },
           count: { $sum: 1 }
         }
-      },
-      // 4. Quedarse solo con los que aparecen más de una vez
-      { $match: { count: { $gt: 1 } } }
+      }
     ];
 
     let results = await collection.aggregate(pipeline).toArray();
     
-    // Filtrar por sede si se especifica: El grupo debe contener al menos un doc en esa sede
+    // 5. Filtrado manual de grupos para determinar qué es un "conflicto"
+    results = results.filter(group => {
+      const isValGeneric = group._id === "SIN DATO" || genericValues.includes(group._id?.toString().toUpperCase().trim());
+      
+      if (!isValGeneric) {
+        // Si no es genérico, es conflicto solo si hay más de uno (duplicado real)
+        return group.count > 1;
+      } else {
+        // Si es genérico (N/A, SIN DATO, etc.)
+        // Solo es conflicto si se solicitó incluir genéricos Y contiene al menos un equipo que SÍ debería tener serial
+        if (req.query.includeGeneric !== 'true') return false;
+        
+        // Si es búsqueda por PLACA, los genéricos siempre son conflictos si count > 1
+        if (campo === 'placa') return group.count > 1;
+
+        // Si es búsqueda por SERIAL, verificamos si hay algún equipo que NO sea de los exceptuados
+        return group.docs.some(doc => !noSerialTypes.includes(doc.dispositivo));
+      }
+    });
+    
+    // Filtrar por sede si se especifica
     if (sede) {
       results = results.filter(group => 
         group.docs.some(doc => doc.sede?.toLowerCase().includes(sede.toLowerCase()))

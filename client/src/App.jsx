@@ -50,6 +50,7 @@ const App = () => {
   const [aulasDup, setAulasDup] = useState([]);
   const [filtroAulaDup, setFiltroAulaDup] = useState('');
   const [appliedFiltroAulaDup, setAppliedFiltroAulaDup] = useState('');
+  const [includeGeneric, setIncludeGeneric] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -159,7 +160,7 @@ const App = () => {
 
   const fetchDuplicados = async () => {
     try {
-      const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}&aula=${filtroAulaDup}`);
+      const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}&aula=${filtroAulaDup}&includeGeneric=${includeGeneric}`);
       setDuplicados(res.data);
       // Aplicar filtros a la vista solo cuando se realiza la consulta
       setAppliedFiltroSede(filtroSede);
@@ -168,6 +169,12 @@ const App = () => {
     } catch (err) {
       console.error("Error fetching duplicates", err);
     }
+  };
+
+  const isGeneric = (val) => {
+    if (!val || val === "SIN DATO") return true;
+    const genericValues = ["0", "N/A", "SIN SERIAL", "S/N", "SIN PLACA", "NONE", "NA", ".", "-", "PENDIENTE", "PENDIENTES"];
+    return genericValues.includes(val.toString().toUpperCase().trim());
   };
 
   const handleDelete = async (id) => {
@@ -725,10 +732,19 @@ const App = () => {
                   ))}
                 </select>
               </div>
-              <div style={{display: 'flex', gap: '1rem'}}>
+              <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center'}}>
                 <button className="btn btn-primary" onClick={fetchDuplicados} style={{height: 'unset', padding: '0.6rem 2rem'}}>
                   Consultar Duplicados
                 </button>
+                <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-muted)'}}>
+                  <input 
+                    type="checkbox" 
+                    checked={includeGeneric} 
+                    onChange={(e) => setIncludeGeneric(e.target.checked)} 
+                    style={{width: 'auto', cursor: 'pointer'}}
+                  />
+                  Incluir Pendientes y N/A
+                </label>
                 <button className="btn btn-outline" onClick={() => {
                   setFiltroSede(''); 
                   setFiltroTipoDup('');
@@ -736,8 +752,9 @@ const App = () => {
                   setAppliedFiltroSede('');
                   setAppliedFiltroTipoDup('');
                   setAppliedFiltroAulaDup('');
+                  setIncludeGeneric(false);
                 }}>
-                  Limpiar
+                  Limpiar Filtros
                 </button>
               </div>
             </div>
@@ -801,7 +818,7 @@ const App = () => {
                     </div>
                     <h3 style={{fontSize: '1.3rem'}}>Aula: {aulaName}</h3>
                     <span className="badge" style={{background: 'rgba(255,255,255,0.1)', fontSize: '0.8rem'}}>
-                      {groupedByAula[aulaName].length} dispositivos con conflictos
+                      {groupedByAula[aulaName].length} registros identificados
                     </span>
                   </div>
                   <button 
@@ -819,7 +836,7 @@ const App = () => {
                     borderRadius: '8px', 
                     padding: '1.2rem', 
                     marginBottom: '1.2rem',
-                    borderLeft: '4px solid var(--danger)'
+                    borderLeft: `4px solid ${isGeneric(item.duplicateId) ? 'var(--warning)' : 'var(--danger)'}`
                   }}>
                     <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'flex-start'}}>
                       <div style={{display: 'flex', gap: '1.5rem', flexWrap: 'wrap'}}>
@@ -842,14 +859,17 @@ const App = () => {
                       )}
                     </div>
 
-                    <div style={{marginTop: '1.5rem', background: 'rgba(239, 68, 68, 0.02)', borderRadius: '6px', padding: '0.75rem'}}>
-                      <div style={{fontSize: '0.75rem', color: '#f87171', fontWeight: '800', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.50rem'}}>
-                        <AlertCircle size={16} /> REGISTROS CONFLICTIVOS EN OTROS LUGARES ({item.allDuplicates.length})
+                    <div style={{marginTop: '1.5rem', background: isGeneric(item.duplicateId) ? 'rgba(245, 158, 11, 0.05)' : 'rgba(239, 68, 68, 0.02)', borderRadius: '6px', padding: '0.75rem'}}>
+                      <div style={{fontSize: '0.75rem', color: isGeneric(item.duplicateId) ? 'var(--warning)' : '#f87171', fontWeight: '800', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.50rem'}}>
+                        <AlertCircle size={16} /> 
+                        {isGeneric(item.duplicateId) 
+                          ? (item.duplicateId === "SIN DATO" ? 'SERIAL FALTANTE (DEBE TENERLO)' : 'VALOR GENÉRICO / PENDIENTE EN OTROS LUGARES') 
+                          : 'REGISTROS CONFLICTIVOS EN OTROS LUGARES'} ({item.allDuplicates.length})
                       </div>
                       <div style={{overflowX: 'auto'}}>
-                        <table style={{fontSize: '0.85rem', border: '1px solid rgba(239, 68, 68, 0.1)'}}>
+                        <table style={{fontSize: '0.85rem', border: `1px solid ${isGeneric(item.duplicateId) ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.1)'}`}}>
                           <thead>
-                            <tr style={{background: 'rgba(239, 68, 68, 0.1)'}}>
+                            <tr style={{background: isGeneric(item.duplicateId) ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'}}>
                               <th>Institución / Sede</th>
                               <th style={{textAlign: 'center'}}>Aula</th>
                               <th style={{textAlign: 'center'}}>Placa / Serial</th>
