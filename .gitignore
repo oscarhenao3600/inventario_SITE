@@ -31,3 +31,8 @@ server/node_modules/
 client/node_modules/
 server/.env
 client/dist/
+
+# Excel Data (Información Sensible)
+BD AULAS SITE JEFE.xlsx
+server/BD AULAS SITE JEFE.xlsx
+*.xlsx

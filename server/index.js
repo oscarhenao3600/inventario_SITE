@@ -155,14 +155,14 @@ app.post('/api/auth/login', async (req, res, next) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    // Generar Token con el Rol
+    // Generar Token con el Rol y Flag de Jefe
     const token = jwt.sign(
-      { id: user._id, username: user.username, role: user.role },
+      { id: user._id, username: user.username, role: user.role, isChief: user.isChief || false },
       JWT_SECRET,
       { expiresIn: '8h' }
     );
 
-    res.json({ token, username: user.username, role: user.role });
+    res.json({ token, username: user.username, role: user.role, isChief: user.isChief || false });
   } catch (err) { next(err); }
 });
 
@@ -648,6 +648,127 @@ app.get('/api/stats', async (req, res, next) => {
       sedes: Array.from(sedesUnicas).sort(),
       instituciones: instNames.sort()
     });
+  } catch (err) { next(err); }
+});
+
+// --- Endpoint Comparativo Exclusivo para oscarhenao ---
+app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
+  try {
+    // Seguridad: Solo usuarios con el flag isChief pueden acceder
+    if (!req.user.isChief) {
+      return res.status(403).json({ error: 'Acceso restringido. Solo disponible para personal directivo.' });
+    }
+
+    const { sede } = req.query;
+    if (!sede) {
+      return res.status(400).json({ error: 'Debe especificar una sede.' });
+    }
+
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+
+    // 1. Obtener datos del Excel
+    const workbook = new ExcelJS.Workbook();
+    const excelPath = require('path').join(__dirname, 'BD AULAS SITE JEFE.xlsx');
+    
+    if (!require('fs').existsSync(excelPath)) {
+      return res.status(500).json({ error: 'El archivo de comparación no se encuentra en el servidor.' });
+    }
+
+    await workbook.xlsx.readFile(excelPath);
+    const sheet = workbook.getWorksheet('TABLA DINAMICA');
+    
+    if (!sheet) {
+      return res.status(500).json({ error: 'No se encontró la hoja TABLA DINAMICA en el archivo Excel.' });
+    }
+
+    // Mapeo de abreviaturas comunes (BD -> Excel)
+    const mappingSedes = {
+      'ITI': 'INSTITUTO TECNICO INDUSTRIAL',
+      'CASD': 'IE CASD',
+      'INEM': 'IE INEM',
+      'NORMAL': 'ESCUELA NORMAL SUPERIOR',
+      'RUFINO SUR': 'IE RUFINO JOSÉ CUERVO SUR',
+      'RUFINO CENTRO': 'IE RUFINO CENTRO',
+      'NACIONAL': 'IE NACIONAL JESUS MARIA OCAMPO'
+    };
+
+    let excelData = null;
+    const headers = [];
+    const normalizedTarget = sede.trim().toUpperCase();
+    const mappedTarget = mappingSedes[normalizedTarget] || normalizedTarget;
+    
+    sheet.eachRow((row, rowNumber) => {
+      const rowValues = row.values.map(v => (v && typeof v === 'object' && v.result !== undefined ? v.result : v));
+      
+      // Capturar cabeceras (fila 4)
+      if (rowNumber === 4) {
+        rowValues.forEach((val, idx) => {
+          if (val) headers[idx] = val;
+        });
+      }
+      
+      // Buscar la sede (comparación flexible)
+      if (rowNumber > 4 && rowValues[1]) {
+        const currentExcelName = rowValues[1].toString().trim().toUpperCase();
+        
+        // Coincidencia exacta, mapeada o contenida (Fuzzy)
+        const isMatch = currentExcelName === mappedTarget || 
+                        currentExcelName === normalizedTarget ||
+                        currentExcelName.includes(normalizedTarget) ||
+                        normalizedTarget.includes(currentExcelName);
+
+        if (isMatch && !excelData) { // Tomar la primera coincidencia
+          excelData = {};
+          headers.forEach((header, idx) => {
+            if (header && header !== 'Etiquetas de fila' && header !== 'Total general') {
+              excelData[header] = parseInt(rowValues[idx]) || 0;
+            }
+          });
+        }
+      }
+    });
+
+    if (!excelData) {
+      return res.status(404).json({ error: `Sede '${sede}' no encontrada en el Excel. Intenta con un nombre más descriptivo.` });
+    }
+
+    // 2. Obtener datos de la DB
+    const dbResults = await collection.aggregate([
+      { $match: { sede: { $regex: new RegExp(`^${sede}$`, 'i') } } },
+      { $group: { _id: "$dispositivo", count: { $sum: 1 } } }
+    ]).toArray();
+
+    const dbData = {};
+    dbResults.forEach(item => {
+      if (item._id) dbData[item._id] = item.count;
+    });
+
+    // 3. Mapeo de nombres de dispositivos (Excel vs DB)
+    const mapping = {
+      'Carro Cargador de Tabletas': 'Carro Cargador de Tabletas',
+      'Pantalla Interactiva Táctil': 'Pantalla Interactiva Táctil',
+      'Servidor Portable de Aula SITE Sistema Cloud': 'Servidor Portable de Aula SITE Sistema Cloud',
+      'Soporte Electrónico Pantalla Interactiva Táctil': 'Soporte Electrónico Pantalla Interactiva Táctil',
+      'Tablet para Docentes': 'Tablet Para Docentes',
+      'Tablet para Estudiantes': 'Tablet Para Estudiantes',
+      'Mesa interactiva tactil': 'Mesa Interactiva Tactil'
+    };
+
+    // 4. Construir respuesta comparativa
+    const comparativo = Object.keys(mapping).map(excelName => {
+      const dbName = mapping[excelName];
+      const excelCount = excelData[excelName] || 0;
+      const dbCount = dbData[dbName] || 0;
+      return {
+        tipo: excelName,
+        excel: excelCount,
+        db: dbCount,
+        diferencia: dbCount - excelCount
+      };
+    });
+
+    res.json(comparativo);
   } catch (err) { next(err); }
 });
 

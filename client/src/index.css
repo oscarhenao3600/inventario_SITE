@@ -336,5 +336,11 @@ tr:hover {
 
 @media (max-width: 640px) {
   .btn-mobile-full { width: 100%; }
+  .hide-mobile { display: none !important; }
+  .show-mobile-only { display: block !important; }
+}
+
+@media (min-width: 641px) {
+  .show-mobile-only { display: none !important; }
 }
 
