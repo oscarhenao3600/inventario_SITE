@@ -376,24 +376,24 @@ const App = () => {
 
   if (!token) {
     return (
-      <div className="container" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh'}}>
-        <div className="glass-card" style={{maxWidth: '400px', width: '100%', padding: '2.5rem'}}>
+      <div className="container" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '1rem'}}>
+        <div className="glass-card" style={{maxWidth: '400px', width: '100%', padding: '2rem'}}>
           <div style={{textAlign: 'center', marginBottom: '2rem'}}>
-            <div style={{background: 'var(--accent)', width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem'}}>
-              <Lock size={30} color="white" />
+            <div style={{background: 'var(--primary)', width: '64px', height: '64px', borderRadius: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem', boxShadow: '0 8px 16px rgba(99, 102, 241, 0.2)'}}>
+              <Lock size={32} color="white" />
             </div>
-            <h2>Inventario Aulas Site</h2>
-            <p style={{color: 'var(--text-muted)'}}>{authMode === 'login' ? 'Inicia sesión para continuar' : 'Crea una cuenta nueva'}</p>
+            <h2 style={{fontSize: '1.5rem', fontWeight: '800', marginBottom: '0.5rem'}}>Inventario Aulas Site</h2>
+            <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>{authMode === 'login' ? 'Inicia sesión para continuar' : 'Crea una cuenta nueva'}</p>
           </div>
 
           <form onSubmit={handleAuth}>
             <div className="form-group">
               <label>Usuario</label>
               <div style={{position: 'relative'}}>
-                <User size={18} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5}} />
+                <User size={18} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, color: 'var(--text-main)'}} />
                 <input 
                   required 
-                  style={{paddingLeft: '2.5rem'}}
+                  style={{paddingLeft: '2.75rem'}}
                   value={authForm.username} 
                   onChange={e => setAuthForm({...authForm, username: e.target.value})} 
                   placeholder="Tu usuario"
@@ -403,11 +403,11 @@ const App = () => {
             <div className="form-group" style={{marginTop: '1rem'}}>
               <label>Contraseña</label>
               <div style={{position: 'relative'}}>
-                <Lock size={18} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5}} />
+                <Lock size={18} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, color: 'var(--text-main)'}} />
                 <input 
                   required 
                   type="password"
-                  style={{paddingLeft: '2.5rem'}}
+                  style={{paddingLeft: '2.75rem'}}
                   value={authForm.password} 
                   onChange={e => setAuthForm({...authForm, password: e.target.value})} 
                   placeholder="••••••••"
@@ -416,12 +416,12 @@ const App = () => {
             </div>
 
             {authError && (
-              <div style={{color: 'var(--danger)', marginTop: '1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+              <div style={{color: 'var(--danger)', marginTop: '1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', padding: '0.75rem', borderRadius: '0.5rem'}}>
                 <AlertCircle size={16} /> {authError}
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary" style={{width: '100%', marginTop: '2rem', height: '45px'}}>
+            <button type="submit" className="btn btn-primary" style={{width: '100%', marginTop: '2rem', height: '48px', fontSize: '1rem'}}>
               {authMode === 'login' ? 'Entrar al Sistema' : 'Registrarse'}
             </button>
             
@@ -432,7 +432,7 @@ const App = () => {
               <button 
                 type="button"
                 onClick={() => {setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError('');}}
-                style={{background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem'}}
+                style={{background: 'none', border: 'none', color: 'var(--primary)', fontWeight: '700', cursor: 'pointer', marginLeft: '0.5rem'}}
               >
                 {authMode === 'login' ? 'Regístrate aquí' : 'Inicia sesión'}
               </button>
@@ -447,58 +447,58 @@ const App = () => {
     <div className="container">
       <header>
         <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
-          <div style={{background: 'var(--accent)', padding: '0.5rem', borderRadius: '8px'}}>
-             <FileUp size={24} color="white" />
+          <div style={{background: 'var(--primary)', padding: '0.75rem', borderRadius: '1rem', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)'}}>
+             <FileSpreadsheet size={24} color="white" />
           </div>
           <div>
             <h1>Inventario Aulas Site</h1>
-            <p style={{color: 'var(--text-muted)'}}>Bienvenido, <strong>{user}</strong></p>
+            <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>Bienvenido, <strong style={{color: 'var(--text-main)'}}>{user}</strong></p>
           </div>
         </div>
-        <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
+        <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap'}}>
           {role === 'admin' && (
             <>
-              <button className="btn btn-outline" onClick={handleExportTotal} title="Descargar todo el inventario agrupado">
-                <Download size={18} /> Exportar Todo
+              <button className="btn btn-outline btn-mobile-full" onClick={handleExportTotal} title="Descargar todo el inventario agrupado">
+                <Download size={18} /> <span className="hide-mobile">Exportar Todo</span>
               </button>
-              <button className="btn btn-outline" onClick={() => setShowImportModal(true)}>
-                <FileUp size={18} /> Importar
+              <button className="btn btn-outline btn-mobile-full" onClick={() => setShowImportModal(true)}>
+                <FileUp size={18} /> <span className="hide-mobile">Importar</span>
               </button>
-              <button className="btn btn-primary" onClick={() => openModal()}>
+              <button className="btn btn-primary btn-mobile-full" onClick={() => openModal()}>
                 <Plus size={18} /> Nuevo
               </button>
             </>
           )}
-          <button className="btn btn-outline" style={{borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={handleLogout} title="Cerrar Sesión">
+          <button className="btn btn-outline btn-mobile-full" style={{borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={handleLogout} title="Cerrar Sesión">
             <LogOut size={18} />
           </button>
         </div>
       </header>
       
-      <div className="stats-grid" style={{marginBottom: '2rem'}}>
+      <div className="stats-grid" style={{marginBottom: '2.5rem'}}>
         <div className="glass-card stat-item">
-          <div style={{display: 'flex', justifyContent: 'space-between'}}>
-            <span>Total Dispositivos</span>
-            <PieChart size={20} color="var(--accent)" />
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+            <span style={{fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)'}}>Total Dispositivos</span>
+            <PieChart size={20} color="var(--primary)" />
           </div>
           <div className="stat-value">{stats.total}</div>
         </div>
         <div className="glass-card stat-item">
-          <span>Instituciones</span>
+          <span style={{fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)'}}>Instituciones</span>
           <div className="stat-value">{stats.totalInstituciones}</div>
         </div>
         <div className="glass-card stat-item">
-          <span>Sedes</span>
+          <span style={{fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)'}}>Sedes</span>
           <div className="stat-value">{stats.totalSedes}</div>
         </div>
-        <div className="glass-card stat-item" style={{borderColor: stats.totalDuplicadosPlaca > 0 ? 'var(--danger)' : 'var(--success)'}}>
-          <span style={{color: stats.totalDuplicadosPlaca > 0 ? 'var(--danger)' : 'inherit'}}>Duplicados (Placa)</span>
+        <div className="glass-card stat-item" style={{borderLeft: `4px solid ${stats.totalDuplicadosPlaca > 0 ? 'var(--danger)' : 'var(--success)'}`}}>
+          <span style={{fontSize: '0.85rem', fontWeight: '600', color: stats.totalDuplicadosPlaca > 0 ? 'var(--danger)' : 'var(--text-muted)'}}>Duplicados (Placa)</span>
           <div className="stat-value" style={{color: stats.totalDuplicadosPlaca > 0 ? 'var(--danger)' : 'var(--success)'}}>
             {stats.totalDuplicadosPlaca}
           </div>
         </div>
-        <div className="glass-card stat-item" style={{borderColor: stats.totalDuplicadosSerial > 0 ? 'var(--danger)' : 'var(--success)'}}>
-          <span style={{color: stats.totalDuplicadosSerial > 0 ? 'var(--danger)' : 'inherit'}}>Duplicados (Serial)</span>
+        <div className="glass-card stat-item" style={{borderLeft: `4px solid ${stats.totalDuplicadosSerial > 0 ? 'var(--danger)' : 'var(--success)'}`}}>
+          <span style={{fontSize: '0.85rem', fontWeight: '600', color: stats.totalDuplicadosSerial > 0 ? 'var(--danger)' : 'var(--text-muted)'}}>Duplicados (Serial)</span>
           <div className="stat-value" style={{color: stats.totalDuplicadosSerial > 0 ? 'var(--danger)' : 'var(--success)'}}>
             {stats.totalDuplicadosSerial}
           </div>
@@ -518,8 +518,8 @@ const App = () => {
 
       {activeTab === 'search' ? (
         <section className="glass-card">
-          <div className="search-container" style={{display: 'flex', gap: '1rem'}}>
-            <div style={{position: 'relative', flex: 1}}>
+          <div className="search-container" style={{marginBottom: '2rem'}}>
+            <div className="search-input-wrapper">
               <Search className="search-icon" size={20} />
               <input 
                 type="text" 
@@ -530,12 +530,12 @@ const App = () => {
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               />
             </div>
-            <button className="btn btn-primary" onClick={() => handleSearch()} style={{height: 'unset', padding: '0 2rem'}}>
+            <button className="btn btn-primary" onClick={() => handleSearch()} style={{minWidth: '160px'}}>
               Consultar
             </button>
           </div>
 
-          <div className="glass-card" style={{padding: '1rem', marginBottom: '1.5rem', background: 'rgba(255,255,255,0.03)'}}>
+          <div className="glass-card" style={{padding: '1.25rem', marginBottom: '2rem', background: 'var(--border)'}}>
              <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap'}}>
                 <div style={{flex: 1, minWidth: '200px'}}>
                   <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Institución</label>
@@ -571,10 +571,10 @@ const App = () => {
                   />
                 </div>
                 <div style={{flex: 1, minWidth: '200px'}}>
-                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Tipo de Dispositivo</label>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem', fontWeight: '600'}}>Tipo de Dispositivo</label>
                   <select 
                     className="search-input" 
-                    style={{margin: 0, padding: '0.5rem', width: '100%', background: 'var(--bg-card)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}} 
+                    style={{margin: 0, padding: '0.6rem 1rem', width: '100%'}} 
                     value={filtroTipoSearch}
                     onChange={(e) => setFiltroTipoSearch(e.target.value)}
                   >
@@ -593,9 +593,9 @@ const App = () => {
           </div>
 
           {(filtroInstitucion || filtroSedeSearch) && dispositivos.length > 0 && (
-            <div className="glass-card" style={{padding: '1.5rem', marginBottom: '1.5rem', borderLeft: '4px solid var(--accent)', background: 'rgba(0,0,0,0.2)'}}>
-              <h4 style={{marginBottom: '1rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-                <PieChart size={18} color="var(--accent)" />
+            <div className="glass-card" style={{padding: '1.5rem', marginBottom: '2rem', borderLeft: '4px solid var(--primary)', background: 'var(--bg-input)'}}>
+              <h4 style={{marginBottom: '1.25rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1rem'}}>
+                <PieChart size={18} color="var(--primary)" />
                 Resumen de Equipos {filtroSedeSearch ? `en Sede: ${filtroSedeSearch}` : `en Institución: ${filtroInstitucion}`}
               </h4>
               <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap'}}>
@@ -606,23 +606,23 @@ const App = () => {
                     return acc;
                   }, {})
                 ).sort((a, b) => b[1] - a[1]).map(([tipo, count]) => (
-                  <div key={tipo} style={{background: 'rgba(255,255,255,0.03)', padding: '0.75rem 1rem', borderRadius: '8px', flex: '1 1 200px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid rgba(255,255,255,0.05)'}}>
-                    <span style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>{tipo}</span>
-                    <span style={{fontWeight: 'bold', color: 'white', fontSize: '1.2rem', background: 'rgba(79, 70, 229, 0.2)', padding: '0.2rem 0.6rem', borderRadius: '4px'}}>{count}</span>
+                  <div key={tipo} style={{background: 'var(--bg-card)', padding: '0.75rem 1rem', borderRadius: '0.75rem', flex: '1 1 200px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid var(--border)', boxShadow: '0 2px 4px rgba(0,0,0,0.02)'}}>
+                    <span style={{fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500'}}>{tipo}</span>
+                    <span style={{fontWeight: '800', color: 'var(--primary)', fontSize: '1.1rem', background: 'rgba(99, 102, 241, 0.1)', padding: '0.25rem 0.6rem', borderRadius: '0.5rem'}}>{count}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
-            <h3 style={{color: 'var(--text-muted)'}}>{dispositivos.length} resultados encontrados</h3>
-            <button className="btn btn-outline" onClick={() => exportToExcel()}>
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem'}}>
+            <h3 style={{color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: '600'}}>{dispositivos.length} resultados encontrados</h3>
+            <button className="btn btn-outline btn-mobile-full" onClick={() => exportToExcel()}>
               <FileSpreadsheet size={18} /> Exportar Selección
             </button>
           </div>
 
-          <div style={{overflowX: 'auto'}}>
+          <div className="table-container">
             <table>
               <thead>
                 <tr>
@@ -639,8 +639,8 @@ const App = () => {
                   <tr key={d._id}>
                     <td>
                       <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-                        <span style={{fontWeight: 'bold', color: 'var(--accent)'}}>{d.placa}</span>
-                        {d.notas && d.notas.trim() !== '' && (
+                        <span style={{fontWeight: '700', color: 'var(--primary)'}}>{d.placa}</span>
+                        {d.notes && d.notes.trim() !== '' && (
                           <Check size={14} color="var(--success)" title="Revisado (con notas)" />
                         )}
                       </div>
@@ -673,13 +673,13 @@ const App = () => {
       ) : (
         <section>
           <div className="stats-grid">
-            <div className={`glass-card ${dupField === 'placa' ? 'active-border' : ''}`} onClick={() => setDupField('placa')} style={{cursor: 'pointer'}}>
-              <h4 style={{color: 'var(--text-muted)'}}>Placas Repetidas</h4>
-              <p style={{fontSize: '1.5rem', fontWeight: 'bold'}}>{stats.totalDuplicadosPlaca}</p>
+            <div className={`glass-card stat-item ${dupField === 'placa' ? 'active-border' : ''}`} onClick={() => setDupField('placa')} style={{cursor: 'pointer'}}>
+              <h4 style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>Placas Repetidas</h4>
+              <p style={{fontSize: '1.75rem', fontWeight: '800'}}>{stats.totalDuplicadosPlaca}</p>
             </div>
-            <div className={`glass-card ${dupField === 'serial' ? 'active-border' : ''}`} onClick={() => setDupField('serial')} style={{cursor: 'pointer'}}>
-              <h4 style={{color: 'var(--text-muted)'}}>Seriales Repetidos</h4>
-              <p style={{fontSize: '1.5rem', fontWeight: 'bold'}}>{stats.totalDuplicadosSerial}</p>
+            <div className={`glass-card stat-item ${dupField === 'serial' ? 'active-border' : ''}`} onClick={() => setDupField('serial')} style={{cursor: 'pointer'}}>
+              <h4 style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>Seriales Repetidos</h4>
+              <p style={{fontSize: '1.75rem', fontWeight: '800'}}>{stats.totalDuplicadosSerial}</p>
             </div>
           </div>
 
@@ -718,10 +718,10 @@ const App = () => {
                 </div>
               </div>
               <div style={{flex: 1, minWidth: '200px'}}>
-                <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Tipo de Dispositivo</label>
+                <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem', fontWeight: '600'}}>Tipo de Dispositivo</label>
                 <select 
                   className="search-input" 
-                  style={{margin: 0, padding: '0.5rem', width: '100%', background: 'var(--bg-card)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px'}} 
+                  style={{margin: 0, padding: '0.6rem 1rem', width: '100%'}} 
                   value={filtroTipoDup}
                   onChange={(e) => setFiltroTipoDup(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchDuplicados()}
@@ -732,11 +732,11 @@ const App = () => {
                   ))}
                 </select>
               </div>
-              <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center'}}>
-                <button className="btn btn-primary" onClick={fetchDuplicados} style={{height: 'unset', padding: '0.6rem 2rem'}}>
+              <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', width: '100%'}}>
+                <button className="btn btn-primary btn-mobile-full" onClick={fetchDuplicados} style={{minWidth: '200px'}}>
                   Consultar Duplicados
                 </button>
-                <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-muted)'}}>
+                <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '500'}}>
                   <input 
                     type="checkbox" 
                     checked={includeGeneric} 
@@ -745,7 +745,7 @@ const App = () => {
                   />
                   Incluir Pendientes y N/A
                 </label>
-                <button className="btn btn-outline" onClick={() => {
+                <button className="btn btn-outline btn-mobile-full" onClick={() => {
                   setFiltroSede(''); 
                   setFiltroTipoDup('');
                   setFiltroAulaDup('');
@@ -810,20 +810,22 @@ const App = () => {
             }
 
             return aulas.map(aulaName => (
-              <div className="glass-card" key={aulaName} style={{marginBottom: '2.5rem', borderTop: '4px solid var(--accent)'}}>
+              <div className="glass-card" key={aulaName} style={{marginBottom: '2.5rem', borderTop: '4px solid var(--primary)'}}>
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem'}}>
                   <div style={{display: 'flex', alignItems: 'center', gap: '0.75rem'}}>
-                    <div style={{background: 'var(--accent)', padding: '0.4rem', borderRadius: '6px'}}>
-                      <Check size={18} color="white" />
+                    <div style={{background: 'var(--primary)', padding: '0.5rem', borderRadius: '0.75rem', boxShadow: '0 4px 10px rgba(99, 102, 241, 0.2)'}}>
+                      <Check size={20} color="white" />
                     </div>
-                    <h3 style={{fontSize: '1.3rem'}}>Aula: {aulaName}</h3>
-                    <span className="badge" style={{background: 'rgba(255,255,255,0.1)', fontSize: '0.8rem'}}>
-                      {groupedByAula[aulaName].length} registros identificados
-                    </span>
+                    <div>
+                      <h3 style={{fontSize: '1.25rem', fontWeight: '800'}}>Aula: {aulaName}</h3>
+                      <span style={{fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600'}}>
+                        {groupedByAula[aulaName].length} registros identificados
+                      </span>
+                    </div>
                   </div>
                   <button 
-                    className="btn btn-primary" 
-                    style={{fontSize: '0.85rem', padding: '0.5rem 1rem'}}
+                    className="btn btn-primary btn-mobile-full" 
+                    style={{fontSize: '0.85rem'}}
                     onClick={() => handleExportAula(aulaName, groupedByAula[aulaName])}
                   >
                     <Download size={14} /> Exportar Reporte de esta Aula
@@ -832,29 +834,30 @@ const App = () => {
 
                 {groupedByAula[aulaName].map((item, idx) => (
                   <div key={`${aulaName}-${idx}`} style={{
-                    background: 'rgba(255,255,255,0.02)', 
-                    borderRadius: '8px', 
-                    padding: '1.2rem', 
-                    marginBottom: '1.2rem',
-                    borderLeft: `4px solid ${isGeneric(item.duplicateId) ? 'var(--warning)' : 'var(--danger)'}`
+                    background: 'var(--bg-input)', 
+                    borderRadius: '1rem', 
+                    padding: '1.5rem', 
+                    marginBottom: '1.5rem',
+                    borderLeft: `4px solid ${isGeneric(item.duplicateId) ? 'var(--warning)' : 'var(--danger)'}`,
+                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
                   }}>
-                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'flex-start'}}>
-                      <div style={{display: 'flex', gap: '1.5rem', flexWrap: 'wrap'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.25rem', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem'}}>
+                      <div style={{display: 'flex', gap: '2rem', flexWrap: 'wrap'}}>
                         <div>
-                          <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Equipo Local en Aula</div>
-                          <div style={{fontWeight: 'bold', fontSize: '1.2rem'}}>
-                            {item.device.dispositivo} - <span style={{color: 'var(--accent)'}}>{item.device.placa}</span>
+                          <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: '800', marginBottom: '0.25rem'}}>Equipo Local en Aula</div>
+                          <div style={{fontWeight: '800', fontSize: '1.25rem', color: 'var(--text-main)'}}>
+                            {item.device.dispositivo} - <span style={{color: 'var(--primary)'}}>{item.device.placa}</span>
                           </div>
-                          <div style={{fontSize: '0.85rem', opacity: 0.9}}>Sede: {item.device.sede} | Aula: {item.device.aula}</div>
+                          <div style={{fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500'}}>Sede: {item.device.sede} | Aula: {item.device.aula}</div>
                         </div>
-                        <div style={{borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '1.5rem'}}>
-                           <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase'}}>Identificación Recibida</div>
-                           <div style={{fontSize: '1rem', fontWeight: 'bold'}}>{item.device.serial || item.device.placa}</div>
+                        <div style={{borderLeft: '2px solid var(--border)', paddingLeft: '1.5rem'}}>
+                           <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: '800', marginBottom: '0.25rem'}}>Identificación Recibida</div>
+                           <div style={{fontSize: '1.1rem', fontWeight: '800', color: 'var(--text-main)'}}>{item.device.serial || item.device.placa}</div>
                         </div>
                       </div>
                       {role === 'admin' && (
-                        <button className="btn btn-outline" style={{padding: '0.5rem'}} onClick={() => openModal(item.device)} title="Editar Equipo Local">
-                          <Edit2 size={16} />
+                        <button className="btn btn-outline" style={{padding: '0.6rem'}} onClick={() => openModal(item.device)} title="Editar Equipo Local">
+                          <Edit2 size={18} />
                         </button>
                       )}
                     </div>
@@ -916,10 +919,10 @@ const App = () => {
       {showModal && (
         <div className="modal-overlay">
           <div className="modal glass-card">
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
-              <h2>{editingDevice ? 'Editar Dispositivo' : 'Nuevo Dispositivo'}</h2>
-              <button onClick={() => setShowModal(false)} style={{background: 'none', border: 'none', color: 'white', cursor: 'pointer'}}>
-                <X size={24} />
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+              <h2 style={{fontSize: '1.5rem', fontWeight: '800'}}>{editingDevice ? 'Editar Dispositivo' : 'Nuevo Dispositivo'}</h2>
+              <button onClick={() => setShowModal(false)} style={{background: 'var(--bg-input)', border: 'none', color: 'var(--text-main)', cursor: 'pointer', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'var(--transition)'}}>
+                <X size={20} />
               </button>
             </div>
             
@@ -1005,13 +1008,13 @@ const App = () => {
       {showImportModal && (
         <div className="modal-overlay">
           <div className="modal glass-card" style={{maxWidth: '500px'}}>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
-              <h2>Importar desde Excel</h2>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+              <h2 style={{fontSize: '1.5rem', fontWeight: '800'}}>Importar desde Excel</h2>
               <button 
                 onClick={() => {setShowImportModal(false); setImportStats(null);}} 
-                style={{background: 'none', border: 'none', color: 'white', cursor: 'pointer'}}
+                style={{background: 'var(--bg-input)', border: 'none', color: 'var(--text-main)', cursor: 'pointer', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}
               >
-                <X size={24} />
+                <X size={20} />
               </button>
             </div>
 
