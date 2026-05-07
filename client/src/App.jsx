@@ -13,6 +13,7 @@ const App = () => {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(localStorage.getItem('user'));
   const [role, setRole] = useState(localStorage.getItem('role'));
+  const [isChief, setIsChief] = useState(localStorage.getItem('isChief') === 'true');
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
   const [authForm, setAuthForm] = useState({ username: '', password: '' });
   const [authError, setAuthError] = useState('');
@@ -57,6 +58,13 @@ const App = () => {
     placa: '', serial: '', dispositivo: '', institucion: '', sede: '', aula: '', modelo: '', notas: ''
   });
   const [validationError, setValidationError] = useState('');
+  
+  // Comparative Dashboard State
+  const [showCompModal, setShowCompModal] = useState(false);
+  const [compSede, setCompSede] = useState('');
+  const [compData, setCompData] = useState([]);
+  const [loadingComp, setLoadingComp] = useState(false);
+  const [compError, setCompError] = useState('');
 
   // Configurar Interceptor de Axios para incluir el Token
   useEffect(() => {
@@ -300,13 +308,15 @@ const App = () => {
       const res = await axios.post(endpoint, authForm);
       
       if (authMode === 'login') {
-        const { token, username, role } = res.data;
+        const { token, username, role, isChief: chiefStatus } = res.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', username);
         localStorage.setItem('role', role);
+        localStorage.setItem('isChief', chiefStatus);
         setToken(token);
         setUser(username);
         setRole(role);
+        setIsChief(chiefStatus);
       } else {
         alert("Registro exitoso. Ahora puedes iniciar sesión.");
         setAuthMode('login');
@@ -367,11 +377,28 @@ const App = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('role');
+    localStorage.removeItem('isChief');
     setToken(null);
     setUser(null);
     setRole(null);
+    setIsChief(false);
     setDispositivos([]);
     setDuplicados([]);
+  };
+
+  const fetchComparativo = async () => {
+    if (!compSede) return;
+    setLoadingComp(true);
+    setCompError('');
+    try {
+      const res = await axios.get(`/api/comparativo?sede=${encodeURIComponent(compSede)}`);
+      setCompData(res.data);
+    } catch (err) {
+      console.error("Error fetching comparativo", err);
+      setCompError(err.response?.data?.error || "Error al obtener la comparación.");
+    } finally {
+      setLoadingComp(false);
+    }
   };
 
   if (!token) {
@@ -455,8 +482,17 @@ const App = () => {
             <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>Bienvenido, <strong style={{color: 'var(--text-main)'}}>{user}</strong></p>
           </div>
         </div>
-        <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap'}}>
-          {role === 'admin' && (
+          <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
+            {isChief && (
+              <button 
+                className="btn btn-primary" 
+                style={{background: 'linear-gradient(to right, #8b5cf6, #ec4899)', border: 'none'}} 
+                onClick={() => {setShowCompModal(true); setCompData([]); setCompSede('');}}
+              >
+                <PieChart size={18} /> Dashboard Jefe
+              </button>
+            )}
+            {role === 'admin' && (
             <>
               <button className="btn btn-outline btn-mobile-full" onClick={handleExportTotal} title="Descargar todo el inventario agrupado">
                 <Download size={18} /> <span className="hide-mobile">Exportar Todo</span>
@@ -1122,6 +1158,93 @@ const App = () => {
           <option key={aula} value={aula} />
         ))}
       </datalist>
+
+      {/* Modal Comparativo para oscarhenao */}
+      {showCompModal && (
+        <div className="modal-overlay">
+          <div className="modal glass-card" style={{maxWidth: '800px'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+              <div>
+                <h2 style={{fontSize: '1.5rem', fontWeight: '800'}}>Dashboard Comparativo (JEFE)</h2>
+                <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>Comparación de inventario Físico vs Excel</p>
+              </div>
+              <button onClick={() => setShowCompModal(false)} style={{background: 'var(--bg-input)', border: 'none', color: 'var(--text-main)', cursor: 'pointer', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="glass-card" style={{padding: '1.5rem', marginBottom: '2rem', background: 'var(--bg-input)'}}>
+              <div style={{display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap'}}>
+                <div style={{flex: 1, minWidth: '250px'}}>
+                  <label style={{fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.5rem', display: 'block'}}>Seleccionar Sede Educativa</label>
+                  <input 
+                    list="sedes-list"
+                    className="search-input"
+                    placeholder="Escribe el nombre de la sede..."
+                    value={compSede}
+                    onChange={(e) => setCompSede(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && fetchComparativo()}
+                  />
+                </div>
+                <button className="btn btn-primary btn-mobile-full" onClick={fetchComparativo} disabled={loadingComp || !compSede}>
+                  {loadingComp ? 'Analizando...' : 'Generar Comparativa'}
+                </button>
+              </div>
+            </div>
+
+            {compError && (
+              <div style={{color: 'var(--danger)', background: 'rgba(239, 68, 68, 0.1)', padding: '1rem', borderRadius: '0.75rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                <AlertCircle size={18} /> {compError}
+              </div>
+            )}
+
+            {compData.length > 0 && (
+              <div className="table-container">
+                <table style={{ minWidth: 'unset' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '0.75rem' }}>Dispositivo</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>Excel</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>DB</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compData.map((item, idx) => (
+                      <tr key={idx}>
+                        <td style={{ fontWeight: '600', fontSize: '0.85rem', padding: '0.75rem' }}>{item.tipo}</td>
+                        <td style={{ textAlign: 'center', fontSize: '1rem', fontWeight: '700', padding: '0.75rem' }}>{item.excel}</td>
+                        <td style={{ textAlign: 'center', fontSize: '1rem', fontWeight: '700', color: 'var(--primary)', padding: '0.75rem' }}>{item.db}</td>
+                        <td style={{ textAlign: 'center', padding: '0.75rem' }}>
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            padding: '0.3rem 0.6rem',
+                            borderRadius: '0.4rem',
+                            fontWeight: '800',
+                            fontSize: '0.75rem',
+                            background: item.diferencia === 0 ? 'rgba(16, 185, 129, 0.1)' : (item.diferencia > 0 ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
+                            color: item.diferencia === 0 ? 'var(--success)' : (item.diferencia > 0 ? '#3b82f6' : 'var(--danger)')
+                          }}>
+                            {item.diferencia === 0 ? <Check size={14} /> : (item.diferencia > 0 ? <Plus size={14} /> : <AlertCircle size={14} />)}
+                            <span className="hide-mobile">{item.diferencia === 0 ? 'COMPLETO' : (item.diferencia > 0 ? `+${item.diferencia} EXTRA` : `${item.diferencia} FALTANTE`)}</span>
+                            <span className="show-mobile-only">{item.diferencia === 0 ? 'OK' : item.diferencia}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            
+            <div style={{marginTop: '2rem', textAlign: 'right'}}>
+              <button className="btn btn-outline" onClick={() => setShowCompModal(false)}>Cerrar Dashboard</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
