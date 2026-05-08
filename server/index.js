@@ -699,48 +699,65 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
     };
 
     let excelData = null;
+    let excelSedeName = '';
     const headers = [];
     const normalizedTarget = sede.trim().toUpperCase();
-    const mappedTarget = mappingSedes[normalizedTarget] || normalizedTarget;
+    const mappedTarget = (mappingSedes[normalizedTarget] || normalizedTarget).toUpperCase();
     
-    sheet.eachRow((row, rowNumber) => {
-      const rowValues = row.values.map(v => (v && typeof v === 'object' && v.result !== undefined ? v.result : v));
-      
-      // Capturar cabeceras (fila 4)
-      if (rowNumber === 4) {
-        rowValues.forEach((val, idx) => {
-          if (val) headers[idx] = val;
-        });
-      }
-      
-      // Buscar la sede (comparación flexible)
-      if (rowNumber > 4 && rowValues[1]) {
-        const currentExcelName = rowValues[1].toString().trim().toUpperCase();
-        
-        // Coincidencia exacta, mapeada o contenida (Fuzzy)
-        const isMatch = currentExcelName === mappedTarget || 
-                        currentExcelName === normalizedTarget ||
-                        currentExcelName.includes(normalizedTarget) ||
-                        normalizedTarget.includes(currentExcelName);
+    // Primero, capturar las cabeceras
+    const row4 = sheet.getRow(4);
+    row4.values.forEach((val, idx) => {
+      const headerText = val && typeof val === 'object' && val.result !== undefined ? val.result : val;
+      if (headerText) headers[idx] = headerText.toString().trim();
+    });
 
-        if (isMatch && !excelData) { // Tomar la primera coincidencia
-          excelData = {};
-          headers.forEach((header, idx) => {
-            if (header && header !== 'Etiquetas de fila' && header !== 'Total general') {
-              excelData[header] = parseInt(rowValues[idx]) || 0;
-            }
-          });
+    // Luego, buscar la mejor fila para la sede
+    let bestMatch = null;
+    let matchType = 0; // 0: none, 1: partial, 2: mapped/exact
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber <= 4) return;
+      
+      const rowValues = row.values.map(v => (v && typeof v === 'object' && v.result !== undefined ? v.result : v));
+      const currentName = rowValues[1] ? rowValues[1].toString().trim().toUpperCase() : '';
+      
+      if (!currentName) return;
+
+      if (currentName === mappedTarget || currentName === normalizedTarget) {
+        bestMatch = rowValues;
+        excelSedeName = rowValues[1].toString().trim();
+        matchType = 2;
+      } else if (matchType < 2 && (currentName.includes(normalizedTarget) || normalizedTarget.includes(currentName))) {
+        // Evitar que coincida con "Total General"
+        if (currentName !== 'TOTAL GENERAL') {
+          bestMatch = rowValues;
+          excelSedeName = rowValues[1].toString().trim();
+          matchType = 1;
         }
       }
     });
 
-    if (!excelData) {
-      return res.status(404).json({ error: `Sede '${sede}' no encontrada en el Excel. Intenta con un nombre más descriptivo.` });
+    if (!bestMatch) {
+      return res.status(404).json({ error: `Sede '${sede}' no encontrada en el Excel.` });
     }
 
-    // 2. Obtener datos de la DB
+    excelData = {};
+    headers.forEach((header, idx) => {
+      if (header && header !== 'Etiquetas de fila' && header !== 'Total general') {
+        excelData[header] = parseInt(bestMatch[idx]) || 0;
+      }
+    });
+
+    // 2. Obtener datos de la DB (Búsqueda inclusiva: Sede o Institución)
     const dbResults = await collection.aggregate([
-      { $match: { sede: { $regex: new RegExp(`^${sede}$`, 'i') } } },
+      { 
+        $match: { 
+          $or: [
+            { sede: { $regex: new RegExp(`^${sede.trim()}$`, 'i') } },
+            { institucion: { $regex: new RegExp(`^${sede.trim()}$`, 'i') } }
+          ]
+        } 
+      },
       { $group: { _id: "$dispositivo", count: { $sum: 1 } } }
     ]).toArray();
 
@@ -749,7 +766,7 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
       if (item._id) dbData[item._id] = item.count;
     });
 
-    // 3. Mapeo de nombres de dispositivos (Excel vs DB)
+    // 3. Mapeo de nombres de dispositivos (Excel -> DB)
     const mapping = {
       'Carro Cargador de Tabletas': 'Carro Cargador de Tabletas',
       'Pantalla Interactiva Táctil': 'Pantalla Interactiva Táctil',
@@ -773,7 +790,7 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
       };
     });
 
-    res.json(comparativo);
+    res.json({ comparativo, excelSede: excelSedeName });
   } catch (err) { next(err); }
 });
 

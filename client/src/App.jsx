@@ -63,6 +63,7 @@ const App = () => {
   const [showCompModal, setShowCompModal] = useState(false);
   const [compSede, setCompSede] = useState('');
   const [compData, setCompData] = useState([]);
+  const [matchedExcelSede, setMatchedExcelSede] = useState('');
   const [loadingComp, setLoadingComp] = useState(false);
   const [compError, setCompError] = useState('');
 
@@ -392,7 +393,8 @@ const App = () => {
     setCompError('');
     try {
       const res = await axios.get(`/api/comparativo?sede=${encodeURIComponent(compSede)}`);
-      setCompData(res.data);
+      setCompData(res.data.comparativo);
+      setMatchedExcelSede(res.data.excelSede);
     } catch (err) {
       console.error("Error fetching comparativo", err);
       setCompError(err.response?.data?.error || "Error al obtener la comparación.");
@@ -1195,6 +1197,15 @@ const App = () => {
             {compError && (
               <div style={{color: 'var(--danger)', background: 'rgba(239, 68, 68, 0.1)', padding: '1rem', borderRadius: '0.75rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
                 <AlertCircle size={18} /> {compError}
+              </div>
+            )}
+
+            {compData.length > 0 && (
+              <div style={{marginBottom: '1.5rem', padding: '1rem', background: 'rgba(139, 92, 246, 0.1)', borderRadius: '0.75rem', border: '1px solid rgba(139, 92, 246, 0.2)'}}>
+                <p style={{fontSize: '0.9rem', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                  <Check size={18} color="var(--success)" /> 
+                  Comparando contra fila de Excel: <strong>{matchedExcelSede}</strong>
+                </p>
               </div>
             )}
 
