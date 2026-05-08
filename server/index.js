@@ -667,13 +667,18 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
     const db = await connectDB();
     const collection = db.collection('dispositivos');
 
-    // 1. Obtener datos del Excel
-    const workbook = new ExcelJS.Workbook();
-    const excelPath = require('path').join(__dirname, 'BD AULAS SITE JEFE.xlsx');
+    // 1. Obtener datos del Excel (Búsqueda robusta para Linux/Docker)
+    const fs = require('fs');
+    const path = require('path');
+    const files = fs.readdirSync(__dirname);
+    const fileName = files.find(f => f.toLowerCase() === 'bd aulas site jefe.xlsx');
     
-    if (!require('fs').existsSync(excelPath)) {
-      return res.status(500).json({ error: 'El archivo de comparación no se encuentra en el servidor.' });
+    if (!fileName) {
+      return res.status(500).json({ error: `No se encontró el archivo 'BD AULAS SITE JEFE.xlsx' en el servidor. (Archivos presentes: ${files.filter(f => f.endsWith('.xlsx')).join(', ') || 'ninguno'})` });
     }
+
+    const excelPath = path.join(__dirname, fileName);
+    const workbook = new ExcelJS.Workbook();
 
     await workbook.xlsx.readFile(excelPath);
     const sheet = workbook.getWorksheet('TABLA DINAMICA');
