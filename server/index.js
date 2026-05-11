@@ -7,6 +7,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const noSerialTypes = [
   "Servidor Portable de Aula SITE Sistema Cloud",
@@ -137,8 +138,17 @@ app.post('/api/auth/register', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Configuración de Rate Limiting para el Login (3 intentos cada 60 min)
+const loginLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 60 minutos
+  max: 5, // Máximo 5 intentos
+  message: { error: 'Demasiados intentos de inicio de sesión. Por favor, inténtalo de nuevo en una hora.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Login de usuario
-app.post('/api/auth/login', async (req, res, next) => {
+app.post('/api/auth/login', loginLimiter, async (req, res, next) => {
   try {
     const { username, password } = req.body;
     
@@ -363,7 +373,13 @@ app.post('/api/dispositivos', async (req, res, next) => {
   try {
     const db = await connectDB();
   const collection = db.collection('dispositivos');
-    const result = await collection.insertOne(req.body);
+    const data = {
+      ...req.body,
+      createdBy: req.user.username,
+      updatedBy: req.user.username,
+      updatedAt: new Date()
+    };
+    const result = await collection.insertOne(data);
     await syncInstitucion(db, req.body.institucion, req.body.sede);
     res.status(201).json(result);
   } catch (err) { next(err); }
@@ -376,6 +392,8 @@ app.put('/api/dispositivos/:id', async (req, res, next) => {
     const db = await connectDB();
   const collection = db.collection('dispositivos');
     const { _id, ...updateData } = req.body;
+    updateData.updatedBy = req.user.username;
+    updateData.updatedAt = new Date();
     const result = await collection.updateOne({ _id: new ObjectId(id) }, { $set: updateData });
     await syncInstitucion(db, updateData.institucion, updateData.sede);
     res.json(result);
@@ -408,7 +426,8 @@ app.get('/api/exportar-total', authenticateToken, async (req, res, next) => {
       { header: 'Placa', key: 'placa', width: 15 },
       { header: 'Serial', key: 'serial', width: 20 },
       { header: 'Modelo', key: 'modelo', width: 15 },
-      { header: 'Notas', key: 'notas', width: 35 }
+      { header: 'Notas', key: 'notas', width: 35 },
+      { header: 'Actualizado Por', key: 'updatedBy', width: 20 }
     ];
     
     // Estilo para el encabezado
@@ -552,9 +571,14 @@ app.post('/api/importar', upload.single('archivo'), async (req, res) => {
         }
 
         if (existing) {
+          data.updatedBy = req.user.username;
+          data.updatedAt = new Date();
           await collection.updateOne({ _id: existing._id }, { $set: data });
           updates++;
         } else {
+          data.createdBy = req.user.username;
+          data.updatedBy = req.user.username;
+          data.updatedAt = new Date();
           await collection.insertOne(data);
           inserts++;
         }
