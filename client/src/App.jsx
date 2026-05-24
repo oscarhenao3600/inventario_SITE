@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download, LogOut, Lock, User } from 'lucide-react';
+import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download, LogOut, Lock, User, Users } from 'lucide-react';
 
 const noSerialTypes = [
   "Servidor Portable de Aula SITE Sistema Cloud",
@@ -66,6 +66,13 @@ const App = () => {
   const [matchedExcelSede, setMatchedExcelSede] = useState('');
   const [loadingComp, setLoadingComp] = useState(false);
   const [compError, setCompError] = useState('');
+
+  // Role Assignment State
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [roleForm, setRoleForm] = useState({ targetUsername: '', isAdmin: false, isLector: true, isChief: false });
+  const [roleLoading, setRoleLoading] = useState(false);
+  const [roleError, setRoleError] = useState('');
+  const [roleSuccess, setRoleSuccess] = useState('');
 
   // Configurar Interceptor de Axios para incluir el Token
   useEffect(() => {
@@ -328,6 +335,35 @@ const App = () => {
     }
   };
 
+  const handleAssignRole = async (e) => {
+    e.preventDefault();
+    setRoleError('');
+    setRoleSuccess('');
+    
+    if (!roleForm.targetUsername.trim()) {
+      setRoleError('El nombre de usuario es requerido.');
+      return;
+    }
+
+    setRoleLoading(true);
+    try {
+      const selectedRole = roleForm.isAdmin ? 'admin' : 'lector';
+      const payload = {
+        targetUsername: roleForm.targetUsername.trim(),
+        role: selectedRole,
+        isChief: roleForm.isChief
+      };
+
+      const res = await axios.post('/api/auth/assign-role', payload);
+      setRoleSuccess(res.data.message || 'Permisos actualizados con éxito.');
+      setRoleForm({ targetUsername: '', isAdmin: false, isLector: true, isChief: false });
+    } catch (err) {
+      setRoleError(err.response?.data?.error || "Error al asignar roles.");
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
   const handleImport = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -486,13 +522,22 @@ const App = () => {
         </div>
           <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
             {isChief && (
-              <button 
-                className="btn btn-primary" 
-                style={{background: 'linear-gradient(to right, #8b5cf6, #ec4899)', border: 'none'}} 
-                onClick={() => {setShowCompModal(true); setCompData([]); setCompSede('');}}
-              >
-                <PieChart size={18} /> Dashboard Jefe
-              </button>
+              <>
+                <button 
+                  className="btn btn-primary" 
+                  style={{background: 'linear-gradient(to right, #8b5cf6, #ec4899)', border: 'none'}} 
+                  onClick={() => {setShowCompModal(true); setCompData([]); setCompSede('');}}
+                >
+                  <PieChart size={18} /> Dashboard Jefe
+                </button>
+                <button 
+                  className="btn btn-outline" 
+                  style={{borderColor: '#8b5cf6', color: '#8b5cf6'}} 
+                  onClick={() => { setShowRoleModal(true); setRoleError(''); setRoleSuccess(''); setRoleForm({ targetUsername: '', isAdmin: false, isLector: true, isChief: false }); }}
+                >
+                  <Users size={18} /> Asignar Roles
+                </button>
+              </>
             )}
             {role === 'admin' && (
             <>
@@ -1215,15 +1260,22 @@ const App = () => {
                   <thead>
                     <tr>
                       <th style={{ padding: '0.75rem' }}>Dispositivo</th>
-                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>Excel</th>
-                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>DB</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>Esperado</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem' }}>En BD</th>
                       <th style={{ textAlign: 'center', padding: '0.75rem' }}>Diferencia</th>
                     </tr>
                   </thead>
                   <tbody>
                     {compData.map((item, idx) => (
-                      <tr key={idx}>
-                        <td style={{ fontWeight: '600', fontSize: '0.85rem', padding: '0.75rem' }}>{item.tipo}</td>
+                      <tr key={idx} style={item.esCalculado ? { background: 'rgba(139, 92, 246, 0.06)', borderTop: '2px solid rgba(139, 92, 246, 0.2)' } : {}}>
+                        <td style={{ fontWeight: '600', fontSize: '0.85rem', padding: '0.75rem' }}>
+                          {item.tipo}
+                          {item.esCalculado && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: '400', marginTop: '0.2rem' }}>
+                              Calculado: 4 sillas por cada mesa en BD
+                            </div>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'center', fontSize: '1rem', fontWeight: '700', padding: '0.75rem' }}>{item.excel}</td>
                         <td style={{ textAlign: 'center', fontSize: '1rem', fontWeight: '700', color: 'var(--primary)', padding: '0.75rem' }}>{item.db}</td>
                         <td style={{ textAlign: 'center', padding: '0.75rem' }}>
@@ -1253,6 +1305,130 @@ const App = () => {
             <div style={{marginTop: '2rem', textAlign: 'right'}}>
               <button className="btn btn-outline" onClick={() => setShowCompModal(false)}>Cerrar Dashboard</button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Modal de Asignación de Roles */}
+      {showRoleModal && (
+        <div className="modal-overlay">
+          <div className="modal glass-card" style={{ maxWidth: '500px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.25rem', margin: 0, fontWeight: '700' }}>Asignar Roles de Usuario</h2>
+              <button 
+                onClick={() => { setShowRoleModal(false); setRoleError(''); setRoleSuccess(''); }} 
+                style={{ background: 'var(--bg-input)', border: 'none', color: 'var(--text-main)', cursor: 'pointer', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                disabled={roleLoading}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {roleError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1.25rem', fontSize: '0.85rem', fontWeight: '600' }}>
+                Error: {roleError}
+              </div>
+            )}
+
+            {roleSuccess && (
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1.25rem', fontSize: '0.85rem', fontWeight: '600' }}>
+                {roleSuccess}
+              </div>
+            )}
+
+            {roleLoading && (
+              <div style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1.25rem', fontSize: '0.85rem', fontWeight: '700', textAlign: 'center' }}>
+                Trabajando... Por favor, espere y evite hacer múltiples clics.
+              </div>
+            )}
+
+            <form onSubmit={handleAssignRole}>
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)' }}>
+                  Nombre de Usuario (Username)
+                </label>
+                <input 
+                  type="text" 
+                  className="form-control"
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                  placeholder="Ej: oscarhenao" 
+                  value={roleForm.targetUsername}
+                  onChange={(e) => setRoleForm({ ...roleForm, targetUsername: e.target.value })}
+                  disabled={roleLoading}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)' }}>
+                  Seleccione los Roles / Permisos:
+                </label>
+                
+                {/* Checkbox Admin */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <input 
+                    type="checkbox" 
+                    id="chkAdmin"
+                    checked={roleForm.isAdmin}
+                    onChange={(e) => setRoleForm({ ...roleForm, isAdmin: e.target.checked, isLector: !e.target.checked })}
+                    disabled={roleLoading}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="chkAdmin" style={{ fontSize: '0.9rem', cursor: 'pointer', fontWeight: '500' }}>
+                    Administrador (Acceso total al inventario y cargas)
+                  </label>
+                </div>
+
+                {/* Checkbox Lector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <input 
+                    type="checkbox" 
+                    id="chkLector"
+                    checked={roleForm.isLector}
+                    onChange={(e) => setRoleForm({ ...roleForm, isLector: e.target.checked, isAdmin: !e.target.checked })}
+                    disabled={roleLoading}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="chkLector" style={{ fontSize: '0.9rem', cursor: 'pointer', fontWeight: '500' }}>
+                    Lector (Solo visualización de inventario)
+                  </label>
+                </div>
+
+                {/* Checkbox isChief */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
+                  <input 
+                    type="checkbox" 
+                    id="chkChief"
+                    checked={roleForm.isChief}
+                    onChange={(e) => setRoleForm({ ...roleForm, isChief: e.target.checked })}
+                    disabled={roleLoading}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="chkChief" style={{ fontSize: '0.9rem', cursor: 'pointer', fontWeight: '600', color: 'var(--primary)' }}>
+                    Personal Directivo (Acceso a Dashboard Jefe y gestión de roles)
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-outline" 
+                  style={{ flex: 1 }}
+                  onClick={() => { setShowRoleModal(false); setRoleError(''); setRoleSuccess(''); }}
+                  disabled={roleLoading}
+                >
+                  Cerrar
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ flex: 1, background: 'linear-gradient(to right, #8b5cf6, #ec4899)', border: 'none' }}
+                  disabled={roleLoading}
+                >
+                  {roleLoading ? 'Actualizando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

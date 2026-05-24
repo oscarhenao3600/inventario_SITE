@@ -172,7 +172,51 @@ app.post('/api/auth/login', loginLimiter, async (req, res, next) => {
       { expiresIn: '8h' }
     );
 
-    res.json({ token, username: user.username, role: user.role, isChief: user.isChief || false });
+  } catch (err) { next(err); }
+});
+
+// Asignar roles a usuarios (Solo disponible para usuarios isChief)
+app.post('/api/auth/assign-role', authenticateToken, async (req, res, next) => {
+  try {
+    // Seguridad: Solo usuarios con el flag isChief pueden acceder
+    if (!req.user.isChief) {
+      return res.status(403).json({ error: 'Acceso restringido. Solo disponible para personal directivo (isChief).' });
+    }
+
+    const { targetUsername, role, isChief } = req.body;
+
+    if (!targetUsername) {
+      return res.status(400).json({ error: 'El nombre de usuario es requerido.' });
+    }
+
+    if (role && role !== 'admin' && role !== 'lector') {
+      return res.status(400).json({ error: 'Rol inválido. Debe ser admin o lector.' });
+    }
+
+    const db = await connectDB();
+    const collection = db.collection('usuarios');
+
+    // Buscar el usuario de destino
+    const targetUser = await collection.findOne({ username: targetUsername.trim() });
+    if (!targetUser) {
+      return res.status(404).json({ error: `El usuario '${targetUsername}' no existe.` });
+    }
+
+    // No permitir modificarse a sí mismo para evitar quitarse sus propios permisos accidentalmente
+    if (req.user.username === targetUsername.trim()) {
+      return res.status(400).json({ error: 'No puedes modificar tus propios permisos.' });
+    }
+
+    const updateData = {};
+    if (role) updateData.role = role;
+    if (isChief !== undefined) updateData.isChief = !!isChief;
+
+    await collection.updateOne(
+      { username: targetUsername.trim() },
+      { $set: updateData }
+    );
+
+    res.json({ success: true, message: `Permisos actualizados para '${targetUsername.trim()}' con éxito.` });
   } catch (err) { next(err); }
 });
 
@@ -812,6 +856,18 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
         db: dbCount,
         diferencia: dbCount - excelCount
       };
+    });
+
+    // 5. Fila calculada de Sillas: 4 sillas por cada Mesa Interactiva Tactil de la BD
+    const mesasEnDB = dbData['Mesa Interactiva Tactil'] || 0;
+    const sillaEsperadas = mesasEnDB * 4;
+    const sillaEnDB = dbData['Silla De Mesa interactiva'] || 0;
+    comparativo.push({
+      tipo: 'Silla De Mesa interactiva',
+      excel: sillaEsperadas,
+      db: sillaEnDB,
+      diferencia: sillaEnDB - sillaEsperadas,
+      esCalculado: true
     });
 
     res.json({ comparativo, excelSede: excelSedeName });
