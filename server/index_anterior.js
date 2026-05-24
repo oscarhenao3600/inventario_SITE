@@ -138,25 +138,13 @@ app.post('/api/auth/register', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Configuración de Rate Limiting para el Login
-// IMPORTANTE: el keyGenerator combina IP + username para que el bloqueo
-// sea POR USUARIO y no por IP. Así un intento fallido de "userA" no
-// bloquea a "userB" aunque vengan de la misma red/NAT.
+// Configuración de Rate Limiting para el Login (3 intentos cada 60 min)
 const loginLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 60 minutos
-  max: 5, // Máximo 5 intentos por usuario
-  // Clave: IP + username en minúsculas (evita distinguir mayúsculas)
-  keyGenerator: (req) => {
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
-    const username = (req.body?.username || '').toLowerCase().trim();
-    return `${ip}::${username}`;
-  },
-  message: { error: 'Demasiados intentos fallidos para este usuario. Por favor, inténtalo de nuevo en una hora.' },
+  max: 5, // Máximo 5 intentos
+  message: { error: 'Demasiados intentos de inicio de sesión. Por favor, inténtalo de nuevo en una hora.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Solo contar como intento fallido cuando la respuesta es 401/403
-  // (no penalizar logins exitosos)
-  skipSuccessfulRequests: true,
 });
 
 // Login de usuario
@@ -183,8 +171,6 @@ app.post('/api/auth/login', loginLimiter, async (req, res, next) => {
       JWT_SECRET,
       { expiresIn: '8h' }
     );
-
-    res.json({ token, username: user.username, role: user.role, isChief: user.isChief || false });
 
   } catch (err) { next(err); }
 });

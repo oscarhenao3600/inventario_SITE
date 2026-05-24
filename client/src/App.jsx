@@ -59,6 +59,15 @@ const App = () => {
   });
   const [validationError, setValidationError] = useState('');
   
+  // ── Loading states ──────────────────────────────────────────────────────────
+  const [loadingSearch, setLoadingSearch]       = useState(false);
+  const [loadingDupes, setLoadingDupes]         = useState(false);
+  const [loadingSave, setLoadingSave]           = useState(false);
+  const [loadingExport, setLoadingExport]       = useState(false);
+  const [loadingExportTotal, setLoadingExportTotal] = useState(false);
+  const [loadingMsg, setLoadingMsg]             = useState('');
+  // ────────────────────────────────────────────────────────────────────────────
+
   // Comparative Dashboard State
   const [showCompModal, setShowCompModal] = useState(false);
   const [compSede, setCompSede] = useState('');
@@ -153,6 +162,8 @@ const App = () => {
   };
 
   const handleSearch = async () => {
+    setLoadingSearch(true);
+    setLoadingMsg('Consultando inventario...');
     try {
       let url = `/api/dispositivos?q=${searchTerm}&tipo=${filtroTipoSearch}`;
       const res = await axios.get(url);
@@ -171,10 +182,15 @@ const App = () => {
       setDispositivos(filtered);
     } catch (err) {
       console.error("Error searching", err);
+    } finally {
+      setLoadingSearch(false);
+      setLoadingMsg('');
     }
   };
 
   const fetchDuplicados = async () => {
+    setLoadingDupes(true);
+    setLoadingMsg('Buscando duplicados...');
     try {
       const res = await axios.get(`/api/duplicados?campo=${dupField}&sede=${filtroSede}&tipo=${filtroTipoDup}&aula=${filtroAulaDup}&includeGeneric=${includeGeneric}`);
       setDuplicados(res.data);
@@ -184,6 +200,9 @@ const App = () => {
       setAppliedFiltroAulaDup(filtroAulaDup);
     } catch (err) {
       console.error("Error fetching duplicates", err);
+    } finally {
+      setLoadingDupes(false);
+      setLoadingMsg('');
     }
   };
 
@@ -219,6 +238,8 @@ const App = () => {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    setLoadingSave(true);
+    setLoadingMsg(editingDevice ? 'Actualizando dispositivo...' : 'Guardando dispositivo...');
     
     // Validar duplicados antes de guardar
     try {
@@ -245,10 +266,15 @@ const App = () => {
       fetchTipos();
     } catch (err) {
       console.error("Error saving", err);
+    } finally {
+      setLoadingSave(false);
+      setLoadingMsg('');
     }
   };
 
   const exportToExcel = async (data = dispositivos) => {
+    setLoadingExport(true);
+    setLoadingMsg('Generando archivo Excel...');
     try {
       const response = await axios.post('/api/exportar', { dispositivos: data }, { 
         responseType: 'blob',
@@ -264,10 +290,15 @@ const App = () => {
       console.error("Error exporting", err);
       const msg = err.response?.data?.error || "Error al exportar a Excel.";
       alert(msg);
+    } finally {
+      setLoadingExport(false);
+      setLoadingMsg('');
     }
   };
 
   const handleExportTotal = async () => {
+    setLoadingExportTotal(true);
+    setLoadingMsg('Exportando inventario completo...');
     try {
       const response = await axios.get('/api/exportar-total', { 
         responseType: 'blob',
@@ -282,6 +313,9 @@ const App = () => {
     } catch (err) {
       console.error("Error exporting total", err);
       alert("Error al exportar todo el inventario.");
+    } finally {
+      setLoadingExportTotal(false);
+      setLoadingMsg('');
     }
   };
 
@@ -384,6 +418,7 @@ const App = () => {
 
     setImporting(true);
     setImportStats(null);
+    setLoadingMsg('Procesando archivo Excel...');
 
     const formData = new FormData();
     formData.append('archivo', file);
@@ -406,6 +441,7 @@ const App = () => {
       alert(errorMsg);
     } finally {
       setImporting(false);
+      setLoadingMsg('');
       e.target.value = ''; // Limpiar para permitir subir el mismo archivo si es necesario
     }
   };
@@ -438,6 +474,19 @@ const App = () => {
       setLoadingComp(false);
     }
   };
+
+  // ── Componente overlay reutilizable ─────────────────────────────────────────
+  const isGlobalLoading = loadingSearch || loadingDupes || loadingSave || loadingExport || loadingExportTotal || importing;
+
+  const LoadingOverlay = () => (
+    <div className="loading-overlay">
+      <div className="loading-overlay__card">
+        <div className="spinner spinner-lg"></div>
+        <p className="loading-overlay__text">{loadingMsg || 'Procesando...'}</p>
+      </div>
+    </div>
+  );
+  // ────────────────────────────────────────────────────────────────────────────
 
   if (!token) {
     return (
@@ -510,6 +559,8 @@ const App = () => {
 
   return (
     <div className="container">
+      {/* Overlay global de carga */}
+      {isGlobalLoading && <LoadingOverlay />}
       <header>
         <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
           <div style={{background: 'var(--primary)', padding: '0.75rem', borderRadius: '1rem', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)'}}>
@@ -613,8 +664,9 @@ const App = () => {
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               />
             </div>
-            <button className="btn btn-primary" onClick={() => handleSearch()} style={{minWidth: '160px'}}>
-              Consultar
+            <button className={`btn btn-primary${loadingSearch ? ' btn-loading' : ''}`} onClick={() => handleSearch()} style={{minWidth: '160px'}} disabled={loadingSearch}>
+              {loadingSearch ? <span className="spinner spinner-sm"></span> : <Search size={18} />}
+              {loadingSearch ? 'Consultando...' : 'Consultar'}
             </button>
           </div>
 
@@ -718,7 +770,20 @@ const App = () => {
                 </tr>
               </thead>
               <tbody>
-                {dispositivos.map(d => (
+                {loadingSearch ? (
+                  // Skeleton rows mientras carga
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={`skel-${i}`} className="skeleton-row">
+                      <td><div className="skeleton-cell" style={{width: '80px'}}></div></td>
+                      <td><div className="skeleton-cell" style={{width: '120px'}}></div></td>
+                      <td><div className="skeleton-cell" style={{width: '160px'}}></div></td>
+                      <td><div className="skeleton-cell" style={{width: '200px'}}></div></td>
+                      <td><div className="skeleton-cell" style={{width: '100px'}}></div></td>
+                      {role === 'admin' && <td><div className="skeleton-cell" style={{width: '60px'}}></div></td>}
+                    </tr>
+                  ))
+                ) : (
+                  dispositivos.map(d => (
                   <tr key={d._id}>
                     <td>
                       <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
@@ -748,7 +813,8 @@ const App = () => {
                       </td>
                     )}
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>
@@ -816,8 +882,9 @@ const App = () => {
                 </select>
               </div>
               <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', width: '100%'}}>
-                <button className="btn btn-primary btn-mobile-full" onClick={fetchDuplicados} style={{minWidth: '200px'}}>
-                  Consultar Duplicados
+                <button className={`btn btn-primary btn-mobile-full${loadingDupes ? ' btn-loading' : ''}`} onClick={fetchDuplicados} style={{minWidth: '200px'}} disabled={loadingDupes}>
+                  {loadingDupes ? <span className="spinner spinner-sm"></span> : null}
+                  {loadingDupes ? 'Consultando...' : 'Consultar Duplicados'}
                 </button>
                 <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '500'}}>
                   <input 
