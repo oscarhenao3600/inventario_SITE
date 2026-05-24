@@ -1,0 +1,241 @@
+## Inventario SITE
+
+Sistema web de gestión de inventario de dispositivos tecnológicos para instituciones educativas. Permite registrar, buscar, importar y exportar equipos (tablets, pantallas, servidores, etc.) por institución, sede y aula.
+
+---
+
+## Arquitectura
+
+```
+inventario_SITE/
+├── client/          # Frontend — React 18 + Vite + Axios
+├── server/          # Backend  — Node.js + Express + MongoDB
+├── docker-compose.yml
+└── .env             # Variables de entorno (debes crearlo tú)
+```
+
+| Capa       | Tecnología                          | Puerto |
+|------------|-------------------------------------|--------|
+| Frontend   | React 18, Vite, Nginx               | 80     |
+| Backend    | Node.js, Express, JWT, Multer       | 3001   |
+| Base datos | MongoDB                             | 27017  |
+
+---
+
+## Variables de entorno — `.env`
+
+Crea el archivo `.env` en la **raíz del proyecto** (junto a `docker-compose.yml`) con el siguiente contenido:
+
+```env
+# ─── BACKEND ──────────────────────────────────────────────
+# Puerto interno del contenedor del servidor Node.js
+PORT=3001
+
+# ─── MONGODB ──────────────────────────────────────────────
+# Credenciales del superusuario de MongoDB (solo para el contenedor)
+MONGO_ROOT_USER=admin
+MONGO_ROOT_PASSWORD=cambiar_esta_password_segura
+
+# Nombre de la base de datos
+DB_NAME=inventario_educativo
+
+# URI completa de conexión (usa las credenciales de arriba)
+# 'mongo' es el nombre del servicio en docker-compose.yml
+MONGODB_URI=mongodb://admin:cambiar_esta_password_segura@mongo:27017/inventario_educativo?authSource=admin
+
+# Puerto externo para conectarte con MongoDB Compass (opcional)
+MONGO_EXTERNAL_PORT=27018
+
+# ─── SEGURIDAD ────────────────────────────────────────────
+# Clave secreta para firmar los tokens JWT
+# Genera una segura con: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+JWT_SECRET=reemplaza_esto_con_una_clave_larga_y_aleatoria
+```
+
+> ⚠️ **Nunca subas el archivo `.env` a Git.** Verifica que `.gitignore` lo incluya.
+
+---
+
+## Puesta en marcha
+
+### Opción A — Con Docker (recomendado)
+
+> Requisitos: [Docker Desktop](https://www.docker.com/products/docker-desktop/) instalado y en ejecución.
+
+**1. Clona el repositorio**
+```bash
+git clone https://github.com/oscarhenao3600/inventario_SITE.git
+cd inventario_SITE
+```
+
+**2. Crea el archivo `.env`**
+
+Copia el bloque de la sección anterior y guárdalo como `.env` en la raíz.
+
+**3. Levanta todos los servicios**
+```bash
+docker compose up -d --build
+```
+
+**4. Abre la aplicación**
+
+Navega a [http://localhost](http://localhost) en tu navegador.
+
+**5. Crea el primer usuario (administrador)**
+
+El primer usuario registrado recibe automáticamente el rol `admin`:
+
+```bash
+curl -X POST http://localhost/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "tu_password_segura"}'
+```
+
+O hazlo directamente desde la interfaz web en la pantalla de registro.
+
+---
+
+### Opción B — Sin Docker (desarrollo local)
+
+> Requisitos: Node.js 18+, MongoDB corriendo localmente.
+
+**1. Configura el backend**
+```bash
+cd server
+npm install
+```
+
+Crea un `.env` dentro de `server/` (o en la raíz):
+```env
+PORT=3001
+MONGODB_URI=mongodb://localhost:27017
+DB_NAME=inventario_educativo
+JWT_SECRET=clave_secreta_local
+```
+
+Inicia el servidor:
+```bash
+npm run dev        # con recarga automática (nodemon)
+# o
+npm start          # producción
+```
+
+**2. Configura el frontend**
+```bash
+cd client
+npm install
+npm run dev
+```
+
+El frontend arrancará en [http://localhost:5173](http://localhost:5173) y redirigirá las llamadas `/api` al backend en el puerto 3001 automáticamente (configurado en `vite.config.js`).
+
+---
+
+##  Roles de usuario
+
+| Rol      | Permisos |
+|----------|----------|
+| `admin`  | Crear, editar, eliminar dispositivos, importar Excel, exportar, gestionar usuarios |
+| `lector` | Solo consultar y exportar |
+| `isChief`| Acceso al dashboard comparativo (se asigna manualmente) |
+
+**Asignar rol a un usuario** (requiere token de un usuario `isChief`):
+```bash
+curl -X POST http://localhost/api/auth/assign-role \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"targetUsername": "usuario2", "role": "admin", "isChief": false}'
+```
+
+---
+
+## Comandos útiles de Docker
+
+```bash
+# Ver logs en tiempo real
+docker compose logs -f
+
+# Ver logs solo del backend
+docker compose logs -f server
+
+# Detener todos los servicios
+docker compose down
+
+# Detener y borrar la base de datos (¡elimina todos los datos!)
+docker compose down -v
+
+# Reiniciar solo el backend después de un cambio
+docker compose restart server
+
+# Reconstruir imágenes tras cambios en el código
+docker compose up -d --build
+```
+
+---
+
+## 🔌 Conexión con MongoDB Compass
+
+Puedes inspeccionar la base de datos visualmente con [MongoDB Compass](https://www.mongodb.com/try/download/compass):
+
+```
+URI: mongodb://admin:TU_PASSWORD@localhost:27018/?authSource=admin
+```
+
+> Usa el puerto `MONGO_EXTERNAL_PORT` definido en tu `.env` (por defecto `27018`).
+
+---
+
+## Importación masiva de dispositivos
+
+El sistema acepta archivos `.xlsx` con la siguiente estructura de columnas:
+
+| Col | Campo       |
+|-----|-------------|
+| A   | Dispositivo |
+| B   | Aula        |
+| C   | Placa       |
+| D   | Serial      |
+| E   | Institución |
+| F   | Sede        |
+| G   | Modelo      |
+| H   | Notas       |
+
+- La primera fila se trata como encabezado y se ignora.
+- Si ya existe un registro con la misma placa o serial, se **actualiza** (upsert).
+- Solo usuarios con rol `admin` pueden importar.
+
+---
+
+## Seguridad
+
+- Contraseñas hasheadas con **bcrypt** (salt rounds: 10).
+- Autenticación mediante **JWT** con expiración de 8 horas.
+- Rate limiting en el login: **5 intentos por usuario** (IP + username) cada 60 minutos. Los intentos exitosos no cuentan.
+- Cabeceras HTTP protegidas con **Helmet**.
+
+---
+
+## Solución de problemas frecuentes
+
+**El contenedor del servidor no conecta con MongoDB**
+- Verifica que `MONGODB_URI` en el `.env` usa `mongo` como host (nombre del servicio Docker), no `localhost`.
+- Asegúrate de que `MONGO_ROOT_USER` y `MONGO_ROOT_PASSWORD` coincidan en `MONGO_INITDB_ROOT_USERNAME/PASSWORD` y en la URI.
+
+**La web no carga en `http://localhost`**
+- Revisa que el puerto 80 no esté ocupado por otro proceso (IIS, Apache, otro Docker).
+- Ejecuta `docker compose ps` para ver el estado de cada contenedor.
+
+**Error al importar Excel**
+- Verifica que la hoja activa sea la primera del libro.
+- El archivo no debe estar abierto en Excel mientras se sube.
+
+**Olvidé la contraseña del admin**
+- Conéctate a MongoDB Compass y en la colección `usuarios` elimina el documento del usuario, luego regístralo de nuevo. Si es el único usuario, volverá a ser `admin`.
+
+---
+
+## Licencia
+
+Uso interno — Secretaría TIC / SITE. 
+Desarrollo realizado por OSCARHENAO
+desarrollador desarrollador full stack
