@@ -1,10 +1,10 @@
-## Inventario SITE
+#  Inventario SITE
 
 Sistema web de gestión de inventario de dispositivos tecnológicos para instituciones educativas. Permite registrar, buscar, importar y exportar equipos (tablets, pantallas, servidores, etc.) por institución, sede y aula.
 
 ---
 
-## Arquitectura
+##  Arquitectura
 
 ```
 inventario_SITE/
@@ -22,7 +22,7 @@ inventario_SITE/
 
 ---
 
-## Variables de entorno — `.env`
+##  Variables de entorno — `.env`
 
 Crea el archivo `.env` en la **raíz del proyecto** (junto a `docker-compose.yml`) con el siguiente contenido:
 
@@ -56,7 +56,7 @@ JWT_SECRET=reemplaza_esto_con_una_clave_larga_y_aleatoria
 
 ---
 
-## Puesta en marcha
+##  Puesta en marcha
 
 ### Opción A — Con Docker (recomendado)
 
@@ -149,7 +149,7 @@ curl -X POST http://localhost/api/auth/assign-role \
 
 ---
 
-## Comandos útiles de Docker
+##  Comandos útiles de Docker
 
 ```bash
 # Ver logs en tiempo real
@@ -173,7 +173,7 @@ docker compose up -d --build
 
 ---
 
-## 🔌 Conexión con MongoDB Compass
+##  Conexión con MongoDB Compass
 
 Puedes inspeccionar la base de datos visualmente con [MongoDB Compass](https://www.mongodb.com/try/download/compass):
 
@@ -185,7 +185,7 @@ URI: mongodb://admin:TU_PASSWORD@localhost:27018/?authSource=admin
 
 ---
 
-## Importación masiva de dispositivos
+##  Importación masiva de dispositivos
 
 El sistema acepta archivos `.xlsx` con la siguiente estructura de columnas:
 
@@ -206,7 +206,7 @@ El sistema acepta archivos `.xlsx` con la siguiente estructura de columnas:
 
 ---
 
-## Seguridad
+##  Seguridad
 
 - Contraseñas hasheadas con **bcrypt** (salt rounds: 10).
 - Autenticación mediante **JWT** con expiración de 8 horas.
@@ -215,7 +215,7 @@ El sistema acepta archivos `.xlsx` con la siguiente estructura de columnas:
 
 ---
 
-## Solución de problemas frecuentes
+##  Solución de problemas frecuentes
 
 **El contenedor del servidor no conecta con MongoDB**
 - Verifica que `MONGODB_URI` en el `.env` usa `mongo` como host (nombre del servicio Docker), no `localhost`.
@@ -234,8 +234,8 @@ El sistema acepta archivos `.xlsx` con la siguiente estructura de columnas:
 
 ---
 
-## Licencia
+##  Licencia
 
-Uso interno — Secretaría TIC / SITE. 
-Desarrollo realizado por OSCARHENAO
-desarrollador desarrollador full stack
+Uso interno — Secretaría TIC / AULAS-SITE.
+Desarrollado por 
+desarollador full stack

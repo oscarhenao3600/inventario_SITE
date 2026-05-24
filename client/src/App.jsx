@@ -562,49 +562,52 @@ const App = () => {
       {/* Overlay global de carga */}
       {isGlobalLoading && <LoadingOverlay />}
       <header>
-        <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
-          <div style={{background: 'var(--primary)', padding: '0.75rem', borderRadius: '1rem', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)'}}>
-             <FileSpreadsheet size={24} color="white" />
+        {/* Marca / título */}
+        <div className="header-brand">
+          <div className="header-logo">
+            <FileSpreadsheet size={24} color="white" />
           </div>
           <div>
             <h1>Inventario Aulas Site</h1>
-            <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>Bienvenido, <strong style={{color: 'var(--text-main)'}}>{user}</strong></p>
+            <p style={{color: 'var(--text-muted)', fontSize: '0.85rem'}}>
+              Bienvenido, <strong style={{color: 'var(--text-main)'}}>{user}</strong>
+            </p>
           </div>
         </div>
-          <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
-            {isChief && (
-              <>
-                <button 
-                  className="btn btn-primary" 
-                  style={{background: 'linear-gradient(to right, #8b5cf6, #ec4899)', border: 'none'}} 
-                  onClick={() => {setShowCompModal(true); setCompData([]); setCompSede('');}}
-                >
-                  <PieChart size={18} /> Dashboard Jefe
-                </button>
-                <button 
-                  className="btn btn-outline" 
-                  style={{borderColor: '#8b5cf6', color: '#8b5cf6'}} 
-                  onClick={() => { setShowRoleModal(true); setRoleError(''); setRoleSuccess(''); setRoleForm({ targetUsername: '', isAdmin: false, isLector: true, isChief: false }); }}
-                >
-                  <Users size={18} /> Asignar Roles
-                </button>
-              </>
-            )}
-            {role === 'admin' && (
-            <>
-              <button className="btn btn-outline btn-mobile-full" onClick={handleExportTotal} title="Descargar todo el inventario agrupado">
-                <Download size={18} /> <span className="hide-mobile">Exportar Todo</span>
+
+        {/* Acciones del header */}
+        <div className="header-actions">
+          {isChief && (
+            <div className="header-action-group">
+              <button
+                className="btn btn-chief"
+                onClick={() => { setShowCompModal(true); setCompData([]); setCompSede(''); }}
+              >
+                <PieChart size={16} /><span>Dashboard Jefe</span>
               </button>
-              <button className="btn btn-outline btn-mobile-full" onClick={() => setShowImportModal(true)}>
-                <FileUp size={18} /> <span className="hide-mobile">Importar</span>
+              <button
+                className="btn btn-outline btn-chief-outline"
+                onClick={() => { setShowRoleModal(true); setRoleError(''); setRoleSuccess(''); setRoleForm({ targetUsername: '', isAdmin: false, isLector: true, isChief: false }); }}
+              >
+                <Users size={16} /><span>Roles</span>
               </button>
-              <button className="btn btn-primary btn-mobile-full" onClick={() => openModal()}>
-                <Plus size={18} /> Nuevo
-              </button>
-            </>
+            </div>
           )}
-          <button className="btn btn-outline btn-mobile-full" style={{borderColor: 'var(--danger)', color: 'var(--danger)'}} onClick={handleLogout} title="Cerrar Sesión">
-            <LogOut size={18} />
+          {role === 'admin' && (
+            <div className="header-action-group">
+              <button className="btn btn-outline" onClick={handleExportTotal} title="Exportar todo el inventario">
+                <Download size={16} /><span className="hide-mobile">Exportar Todo</span>
+              </button>
+              <button className="btn btn-outline" onClick={() => setShowImportModal(true)} title="Importar desde Excel">
+                <FileUp size={16} /><span className="hide-mobile">Importar</span>
+              </button>
+              <button className="btn btn-primary" onClick={() => openModal()}>
+                <Plus size={16} /><span>Nuevo</span>
+              </button>
+            </div>
+          )}
+          <button className="btn btn-logout" onClick={handleLogout} title="Cerrar sesión">
+            <LogOut size={16} />
           </button>
         </div>
       </header>
@@ -1417,7 +1420,7 @@ const App = () => {
                   type="text" 
                   className="form-control"
                   style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
-                  placeholder="Ej: oscarhenao" 
+                  placeholder="Ej: AndresBedoya" 
                   value={roleForm.targetUsername}
                   onChange={(e) => setRoleForm({ ...roleForm, targetUsername: e.target.value })}
                   disabled={roleLoading}

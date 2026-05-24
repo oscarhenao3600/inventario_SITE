@@ -733,7 +733,7 @@ app.get('/api/stats', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// --- Endpoint Comparativo Exclusivo para oscarhenao ---
+// --- Endpoint Comparativo Exclusivo para isChief ---
 app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
   try {
     // Seguridad: Solo usuarios con el flag isChief pueden acceder
