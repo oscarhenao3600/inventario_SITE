@@ -1,8 +1,8 @@
 const { MongoClient } = require('mongodb');
 
-const uri = 'mongodb://localhost:27017';
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const client = new MongoClient(uri);
-const dbName = 'inventario_educativo';
+const dbName = process.env.DB_NAME || 'inventario_educativo';
 
 async function setup() {
   try {
@@ -16,11 +16,14 @@ async function setup() {
     await usersCollection.createIndex({ username: 1 }, { unique: true });
     console.log('Unique index on username created.');
     
-    // Opcional: Crear índice para la placa en dispositivos si no existe
+    // Crear índices en dispositivos para mejorar el rendimiento de las consultas
     const dispositivosCollection = db.collection('dispositivos');
     await dispositivosCollection.createIndex({ placa: 1 });
+    await dispositivosCollection.createIndex({ serial: 1 });
+    await dispositivosCollection.createIndex({ sede: 1 });
+    await dispositivosCollection.createIndex({ aula: 1 });
     
-    console.log('Database setup completed successfully.');
+    console.log('Database setup completed successfully with all indexes.');
   } catch (err) {
     console.error('Error setting up database:', err);
   } finally {

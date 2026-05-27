@@ -27,6 +27,12 @@ const upload = multer({ dest: uploadDir });
 
 const app = express();
 
+// Middleware para registrar todas las peticiones (Diagnóstico)
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${new Date().toISOString()} - ${req.method} ${req.url}`, req.method === 'POST' || req.method === 'PUT' ? req.body : '');
+  next();
+});
+
 // PUERTO DE LA APLICACIÓN (BACKEND)
 // Para cambiar el puerto donde escucha el servidor, modifica process.env.PORT o el valor 3001 aquí
 const port = process.env.PORT || 3001;
@@ -254,7 +260,7 @@ app.delete('/api/dispositivos/:id', requireAdmin);
 // Buscar dispositivos (por placa o serial)
 app.get('/api/dispositivos', async (req, res, next) => {
   try {
-    const { q, tipo } = req.query;
+    const { q, tipo, institucion, sede, aula } = req.query;
     const db = await connectDB();
   const collection = db.collection('dispositivos');
   
@@ -273,8 +279,26 @@ app.get('/api/dispositivos', async (req, res, next) => {
   if (tipo) {
     query.dispositivo = tipo;
   }
+  if (institucion) {
+    query.institucion = { $regex: new RegExp(`^${institucion.trim()}$`, 'i') };
+  }
+  if (sede) {
+    query.sede = { $regex: new RegExp(`^${sede.trim()}$`, 'i') };
+  }
+  if (aula) {
+    query.aula = { $regex: new RegExp(`^${aula.trim()}$`, 'i') };
+  }
   
-  const results = await collection.find(query).toArray();
+  let cursor = collection.find(query);
+  
+  // Limitar resultados a 200 cuando no hay ningún filtro de búsqueda específico activo
+  // Esto previene la congelación en Chrome al cargar miles de registros a la vez
+  const hasFilters = q || tipo || institucion || sede || aula;
+  if (!hasFilters) {
+    cursor = cursor.limit(200);
+  }
+  
+  const results = await cursor.toArray();
   res.json(results);
   } catch (err) { next(err); }
 });
@@ -400,12 +424,18 @@ app.post('/api/validar', async (req, res, next) => {
     const db = await connectDB();
   const collection = db.collection('dispositivos');
   
+  const isGeneric = (val) => {
+    if (!val) return true;
+    const genericValues = ["0", "N/A", "SIN SERIAL", "S/N", "SIN PLACA", "NONE", "NA", ".", "-", "PENDIENTE", "PENDIENTES"];
+    return genericValues.includes(val.toString().toUpperCase().trim());
+  };
+
   const query = {
     $or: []
   };
   
-  if (placa) query.$or.push({ placa });
-  if (serial) query.$or.push({ serial });
+  if (placa && !isGeneric(placa)) query.$or.push({ placa });
+  if (serial && !isGeneric(serial)) query.$or.push({ serial });
   
   if (query.$or.length === 0) return res.json({ available: true });
   

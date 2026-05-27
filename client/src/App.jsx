@@ -40,6 +40,7 @@ const App = () => {
   const [importing, setImporting] = useState(false);
   const [importStats, setImportStats] = useState(null);
   const [tiposDispositivo, setTiposDispositivo] = useState([]);
+  const [showOtroInput, setShowOtroInput] = useState(false);
   
   // Advanced filters
   const [filtroInstitucion, setFiltroInstitucion] = useState('');
@@ -165,21 +166,15 @@ const App = () => {
     setLoadingSearch(true);
     setLoadingMsg('Consultando inventario...');
     try {
-      let url = `/api/dispositivos?q=${searchTerm}&tipo=${filtroTipoSearch}`;
-      const res = await axios.get(url);
-      
-      let filtered = res.data;
-      if (filtroInstitucion) {
-        filtered = filtered.filter(d => d.institucion?.toLowerCase() === filtroInstitucion.toLowerCase());
-      }
-      if (filtroSedeSearch) {
-        filtered = filtered.filter(d => d.sede?.toLowerCase() === filtroSedeSearch.toLowerCase());
-      }
-      if (filtroAulaSearch) {
-        filtered = filtered.filter(d => d.aula?.toLowerCase() === filtroAulaSearch.toLowerCase());
-      }
-      
-      setDispositivos(filtered);
+      const params = new URLSearchParams();
+      if (searchTerm) params.append('q', searchTerm);
+      if (filtroTipoSearch) params.append('tipo', filtroTipoSearch);
+      if (filtroInstitucion) params.append('institucion', filtroInstitucion);
+      if (filtroSedeSearch) params.append('sede', filtroSedeSearch);
+      if (filtroAulaSearch) params.append('aula', filtroAulaSearch);
+
+      const res = await axios.get(`/api/dispositivos?${params.toString()}`);
+      setDispositivos(res.data);
     } catch (err) {
       console.error("Error searching", err);
     } finally {
@@ -228,9 +223,12 @@ const App = () => {
     if (device) {
       setEditingDevice(device);
       setFormData({ ...device });
+      const isCustom = device.dispositivo && !tiposDispositivo.includes(device.dispositivo);
+      setShowOtroInput(isCustom);
     } else {
       setEditingDevice(null);
       setFormData({ placa: '', serial: '', dispositivo: '', institucion: '', sede: '', aula: '', modelo: '', notas: '' });
+      setShowOtroInput(false);
     }
     setValidationError('');
     setShowModal(true);
@@ -251,17 +249,27 @@ const App = () => {
 
       if (!validRes.data.available) {
         setValidationError(`Atención: Ya existe un registro con esta ${validRes.data.reason}.`);
+        setLoadingSave(false);
+        setLoadingMsg('');
         return;
       }
 
+      let savedDevice;
       if (editingDevice) {
         await axios.put(`/api/dispositivos/${editingDevice._id}`, formData);
+        savedDevice = { ...formData, _id: editingDevice._id };
+        setDispositivos(prev => prev.map(d => d._id === editingDevice._id ? savedDevice : d));
       } else {
-        await axios.post('/api/dispositivos', formData);
+        const postRes = await axios.post('/api/dispositivos', formData);
+        const insertedId = postRes.data.insertedId || postRes.data._id;
+        savedDevice = { ...formData, _id: insertedId };
+        setDispositivos(prev => [savedDevice, ...prev]);
       }
       
       setShowModal(false);
-      activeTab === 'search' ? handleSearch() : fetchDuplicados();
+      if (activeTab === 'dupes') {
+        fetchDuplicados();
+      }
       fetchStats();
       fetchTipos();
     } catch (err) {
@@ -1100,8 +1108,17 @@ const App = () => {
               <div className="form-group">
                 <label>Tipo de Dispositivo</label>
                 <select 
-                  value={formData.dispositivo} 
-                  onChange={e => setFormData({...formData, dispositivo: e.target.value})} 
+                  value={showOtroInput ? 'OTRO' : formData.dispositivo} 
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === 'OTRO') {
+                      setShowOtroInput(true);
+                      setFormData({...formData, dispositivo: ''});
+                    } else {
+                      setShowOtroInput(false);
+                      setFormData({...formData, dispositivo: val});
+                    }
+                  }} 
                 >
                   <option value="">Seleccione un tipo...</option>
                   {tiposDispositivo.map(tipo => (
@@ -1109,10 +1126,11 @@ const App = () => {
                   ))}
                   <option value="OTRO">-- Otro (Escribir abajo) --</option>
                 </select>
-                {formData.dispositivo === 'OTRO' && (
+                {showOtroInput && (
                   <input 
                     style={{marginTop: '0.5rem'}}
                     placeholder="Escriba el nuevo tipo..." 
+                    value={formData.dispositivo}
                     onChange={e => setFormData({...formData, dispositivo: e.target.value})} 
                   />
                 )}
