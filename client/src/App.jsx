@@ -47,6 +47,7 @@ const App = () => {
   const [filtroSedeSearch, setFiltroSedeSearch] = useState('');
   const [filtroAulaSearch, setFiltroAulaSearch] = useState('');
   const [filtroTipoSearch, setFiltroTipoSearch] = useState('');
+  const [filtroVerificacion, setFiltroVerificacion] = useState('');
   
   const [aulasSearch, setAulasSearch] = useState([]);
   const [aulasDup, setAulasDup] = useState([]);
@@ -172,6 +173,7 @@ const App = () => {
       if (filtroInstitucion) params.append('institucion', filtroInstitucion);
       if (filtroSedeSearch) params.append('sede', filtroSedeSearch);
       if (filtroAulaSearch) params.append('aula', filtroAulaSearch);
+      if (filtroVerificacion) params.append('verificacion', filtroVerificacion);
 
       const res = await axios.get(`/api/dispositivos?${params.toString()}`);
       setDispositivos(res.data);
@@ -205,6 +207,11 @@ const App = () => {
     if (!val || val === "SIN DATO") return true;
     const genericValues = ["0", "N/A", "SIN SERIAL", "S/N", "SIN PLACA", "NONE", "NA", ".", "-", "PENDIENTE", "PENDIENTES"];
     return genericValues.includes(val.toString().toUpperCase().trim());
+  };
+
+  const hasTemporalSuffix = (val) => {
+    if (!val) return false;
+    return /-\d+$/.test(val.toString().trim());
   };
 
   const handleDelete = async (id) => {
@@ -730,8 +737,22 @@ const App = () => {
                     ))}
                   </select>
                 </div>
+                <div style={{flex: 1, minWidth: '200px'}}>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem', fontWeight: '600'}}>Estado de Verificación (-1)</label>
+                  <select 
+                    className="search-input" 
+                    style={{margin: 0, padding: '0.6rem 1rem', width: '100%'}} 
+                    value={filtroVerificacion}
+                    onChange={(e) => setFiltroVerificacion(e.target.value)}
+                  >
+                    <option value="">Todos los dispositivos</option>
+                    <option value="todos">Equipos Temporales (Placa/Serial '-1')</option>
+                    <option value="pendientes">Temporales - Por Verificar (Notas)</option>
+                    <option value="verificados">Temporales - Ya Verificados (Notas)</option>
+                  </select>
+                </div>
                 <div style={{display: 'flex', alignItems: 'flex-end'}}>
-                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroAulaSearch(''); setFiltroTipoSearch(''); setSearchTerm('');}}>
+                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroAulaSearch(''); setFiltroTipoSearch(''); setFiltroVerificacion(''); setSearchTerm('');}}>
                     Limpiar Filtros
                   </button>
                 </div>
@@ -797,15 +818,34 @@ const App = () => {
                   dispositivos.map(d => (
                   <tr key={d._id}>
                     <td>
-                      <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-                        <span style={{fontWeight: '700', color: 'var(--primary)'}}>{d.placa}</span>
-                        {d.notes && d.notes.trim() !== '' && (
-                          <Check size={14} color="var(--success)" title="Revisado (con notas)" />
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '0.2rem'}}>
+                        <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                          <span style={{fontWeight: '700', color: hasTemporalSuffix(d.placa) ? 'var(--warning)' : 'var(--primary)'}}>{d.placa}</span>
+                          {(d.notas || d.notes) && (d.notas || d.notes).trim() !== '' && (
+                            <Check size={14} color="var(--success)" title="Tiene notas" />
+                          )}
+                        </div>
+                        {hasTemporalSuffix(d.placa) && (
+                          <span style={{fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 'bold'}}>⚠️ Placa Temp</span>
                         )}
                       </div>
                     </td>
-                    <td>{d.serial}</td>
-                    <td>{d.dispositivo}</td>
+                    <td>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '0.2rem'}}>
+                        <span style={{color: hasTemporalSuffix(d.serial) ? 'var(--warning)' : 'inherit', fontWeight: hasTemporalSuffix(d.serial) ? '700' : 'normal'}}>{d.serial}</span>
+                        {hasTemporalSuffix(d.serial) && (
+                          <span style={{fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 'bold'}}>⚠️ Serial Temp</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div>{d.dispositivo}</div>
+                      {(d.notas || d.notes) && (d.notas || d.notes).trim() !== '' && (
+                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={d.notas || d.notes}>
+                          📝 {d.notas || d.notes}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <div style={{fontSize: '0.9rem'}}>{d.institucion}</div>
                       <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{d.sede}</div>

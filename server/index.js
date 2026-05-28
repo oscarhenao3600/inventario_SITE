@@ -260,7 +260,7 @@ app.delete('/api/dispositivos/:id', requireAdmin);
 // Buscar dispositivos (por placa o serial)
 app.get('/api/dispositivos', async (req, res, next) => {
   try {
-    const { q, tipo, institucion, sede, aula } = req.query;
+    const { q, tipo, institucion, sede, aula, verificacion } = req.query;
     const db = await connectDB();
   const collection = db.collection('dispositivos');
   
@@ -288,12 +288,48 @@ app.get('/api/dispositivos', async (req, res, next) => {
   if (aula) {
     query.aula = { $regex: new RegExp(`^${aula.trim()}$`, 'i') };
   }
+
+  // Filtro especial para auditar equipos temporales (sufijo -1, -2, etc.)
+  if (verificacion) {
+    query.$or = [
+      { placa: { $regex: /-\d+$/ } },
+      { serial: { $regex: /-\d+$/ } }
+    ];
+
+    if (verificacion === 'pendientes') {
+      // Notas vacías o que no contengan palabras clave de verificación
+      query.$and = [
+        {
+          $or: [
+            { notas: { $exists: false } },
+            { notas: null },
+            { notas: "" },
+            { notas: { $not: /verificado|revisado|ok/i } },
+            { notes: { $exists: false } },
+            { notes: null },
+            { notes: "" },
+            { notes: { $not: /verificado|revisado|ok/i } }
+          ]
+        }
+      ];
+    } else if (verificacion === 'verificados') {
+      // Notas que sí contengan palabras clave de verificación
+      query.$and = [
+        {
+          $or: [
+            { notas: { $regex: /verificado|revisado|ok/i } },
+            { notes: { $regex: /verificado|revisado|ok/i } }
+          ]
+        }
+      ];
+    }
+  }
   
   let cursor = collection.find(query);
   
   // Limitar resultados a 200 cuando no hay ningún filtro de búsqueda específico activo
   // Esto previene la congelación en Chrome al cargar miles de registros a la vez
-  const hasFilters = q || tipo || institucion || sede || aula;
+  const hasFilters = q || tipo || institucion || sede || aula || verificacion;
   if (!hasFilters) {
     cursor = cursor.limit(200);
   }
