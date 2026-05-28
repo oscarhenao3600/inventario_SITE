@@ -12,7 +12,8 @@ const rateLimit = require('express-rate-limit');
 const noSerialTypes = [
   "Servidor Portable de Aula SITE Sistema Cloud",
   "Soporte Electrónico Pantalla Interactiva Táctil",
-  "Carro Cargador de Tabletas"
+  "Carro Cargador de Tabletas",
+  "Silla De Mesa interactiva"
 ];
 
 // --- CONFIGURACIÓN DE VARIABLES DE ENTORNO ---
@@ -374,7 +375,7 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
               ? [{
                   $nor: [
                     { 
-                      dispositivo: { $regex: /^(Carro Cargador de Tabletas|Soporte Electrónico Pantalla Interactiva Táctil|Servidor Portable de Aula SITE Sistema Cloud)$/i },
+                      dispositivo: { $regex: /^(Carro Cargador de Tabletas|Soporte Electrónico Pantalla Interactiva Táctil|Servidor Portable de Aula SITE Sistema Cloud|Silla De Mesa interactiva)$/i },
                       $or: [
                         { [campo]: { $in: genericValues } },
                         { [campo]: { $exists: false } }

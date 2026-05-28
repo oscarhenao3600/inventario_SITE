@@ -5,7 +5,8 @@ import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Tr
 const noSerialTypes = [
   "Servidor Portable de Aula SITE Sistema Cloud",
   "Soporte Electrónico Pantalla Interactiva Táctil",
-  "Carro Cargador de Tabletas"
+  "Carro Cargador de Tabletas",
+  "Silla De Mesa interactiva"
 ];
 
 const App = () => {
