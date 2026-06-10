@@ -72,10 +72,17 @@ async function syncInstitucion(db, nombre, sede) {
   const normalizedNombre = nombre.trim().toUpperCase();
   const normalizedSede = sede?.trim().toUpperCase();
   
+  const now = new Date();
   await coll.updateOne(
     { nombre: normalizedNombre },
     { 
-      $set: { nombre: normalizedNombre },
+      $set: { 
+        nombre: normalizedNombre,
+        updatedAt: now
+      },
+      $setOnInsert: {
+        createdAt: now
+      },
       ...(normalizedSede ? { $addToSet: { sedes: normalizedSede } } : {})
     },
     { upsert: true }
@@ -134,11 +141,13 @@ app.post('/api/auth/register', async (req, res, next) => {
     // Hashear contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
     
+    const now = new Date();
     const result = await collection.insertOne({
       username,
       password: hashedPassword,
       role,
-      createdAt: new Date()
+      createdAt: now,
+      updatedAt: now
     });
 
     res.json({ success: true, message: `Usuario registrado como ${role} con éxito` });
@@ -231,6 +240,7 @@ app.post('/api/auth/assign-role', authenticateToken, async (req, res, next) => {
     const updateData = {};
     if (role) updateData.role = role;
     if (isChief !== undefined) updateData.isChief = !!isChief;
+    updateData.updatedAt = new Date();
 
     await collection.updateOne(
       { username: targetUsername.trim() },
@@ -481,11 +491,21 @@ app.post('/api/validar', async (req, res, next) => {
   // Filtrar el documento que estamos editando
   const duplicates = existing.filter(doc => doc._id.toString() !== id);
   
-  if (duplicates.length > 0) {
+  // Filtrar duplicados que sean reservas de placas (con campos de ubicacion/serial vacios)
+  const actualDuplicates = duplicates.filter(doc => {
+    const isPlaceholder = doc.notas === "Reserva - Generación de placa" &&
+      (!doc.serial || doc.serial.trim() === "") &&
+      (!doc.institucion || doc.institucion.trim() === "") &&
+      (!doc.sede || doc.sede.trim() === "") &&
+      (!doc.aula || doc.aula.trim() === "");
+    return !isPlaceholder;
+  });
+  
+  if (actualDuplicates.length > 0) {
     return res.json({ 
       available: false, 
-      reason: duplicates[0].placa === placa ? 'placa' : 'serial',
-      doc: duplicates[0]
+      reason: actualDuplicates[0].placa === placa ? 'placa' : 'serial',
+      doc: actualDuplicates[0]
     });
   }
   
@@ -497,13 +517,54 @@ app.post('/api/validar', async (req, res, next) => {
 app.post('/api/dispositivos', async (req, res, next) => {
   try {
     const db = await connectDB();
-  const collection = db.collection('dispositivos');
+    const collection = db.collection('dispositivos');
+    
+    const now = new Date();
     const data = {
       ...req.body,
       createdBy: req.user.username,
       updatedBy: req.user.username,
-      updatedAt: new Date()
+      createdAt: now,
+      updatedAt: now
     };
+    
+    // Verificar si existe un registro borrador/reserva con esa misma placa para sobrescribirlo
+    if (data.placa) {
+      const existingPlaceholder = await collection.findOne({
+        placa: data.placa,
+        notas: "Reserva - Generación de placa",
+        $or: [
+          { serial: { $in: [null, ""] } },
+          { serial: { $exists: false } }
+        ],
+        $or: [
+          { institucion: { $in: [null, ""] } },
+          { institucion: { $exists: false } }
+        ],
+        $or: [
+          { sede: { $in: [null, ""] } },
+          { sede: { $exists: false } }
+        ],
+        $or: [
+          { aula: { $in: [null, ""] } },
+          { aula: { $exists: false } }
+        ]
+      });
+      
+      if (existingPlaceholder) {
+        // Sobrescribir el borrador, conservando el createdAt original
+        const { createdAt, _id, ...updateData } = data;
+        updateData.updatedAt = now;
+        
+        const result = await collection.updateOne(
+          { _id: existingPlaceholder._id },
+          { $set: updateData }
+        );
+        await syncInstitucion(db, req.body.institucion, req.body.sede);
+        return res.json({ acknowledged: true, insertedId: existingPlaceholder._id, overwritten: true });
+      }
+    }
+    
     const result = await collection.insertOne(data);
     await syncInstitucion(db, req.body.institucion, req.body.sede);
     res.status(201).json(result);
@@ -515,8 +576,8 @@ app.put('/api/dispositivos/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = await connectDB();
-  const collection = db.collection('dispositivos');
-    const { _id, ...updateData } = req.body;
+    const collection = db.collection('dispositivos');
+    const { _id, createdAt, ...updateData } = req.body;
     updateData.updatedBy = req.user.username;
     updateData.updatedAt = new Date();
     const result = await collection.updateOne({ _id: new ObjectId(id) }, { $set: updateData });
@@ -551,8 +612,10 @@ app.get('/api/exportar-total', authenticateToken, async (req, res, next) => {
       { header: 'Placa', key: 'placa', width: 15 },
       { header: 'Serial', key: 'serial', width: 20 },
       { header: 'Modelo', key: 'modelo', width: 15 },
-      { header: 'Notas', key: 'notas', width: 35 },
-      { header: 'Actualizado Por', key: 'updatedBy', width: 20 }
+      { header: 'Notas', key: 'notes', width: 35 },
+      { header: 'Actualizado Por', key: 'updatedBy', width: 20 },
+      { header: 'Fecha de Creación', key: 'createdAtFormatted', width: 25 },
+      { header: 'Fecha de Actualización', key: 'updatedAtFormatted', width: 25 }
     ];
     
     // Estilo para el encabezado
@@ -565,11 +628,17 @@ app.get('/api/exportar-total', authenticateToken, async (req, res, next) => {
     };
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    // Agregar filas
-    worksheet.addRows(dispositivos);
+    // Formatear filas y agregar
+    const rows = dispositivos.map(d => ({
+      ...d,
+      notes: d.notas || d.notes || '',
+      createdAtFormatted: d.createdAt ? new Date(d.createdAt).toISOString().replace('T', ' ').substring(0, 19) : '',
+      updatedAtFormatted: d.updatedAt ? new Date(d.updatedAt).toISOString().replace('T', ' ').substring(0, 19) : ''
+    }));
+    worksheet.addRows(rows);
 
     // Auto-filtro para facilitar la lectura
-    worksheet.autoFilter = 'A1:H1';
+    worksheet.autoFilter = 'A1:K1';
 
     // Formateo de celdas
     worksheet.eachRow((row, rowNumber) => {
@@ -698,12 +767,15 @@ app.post('/api/importar', upload.single('archivo'), async (req, res) => {
         if (existing) {
           data.updatedBy = req.user.username;
           data.updatedAt = new Date();
+          // Conservar createdAt si ya existe
           await collection.updateOne({ _id: existing._id }, { $set: data });
           updates++;
         } else {
+          const now = new Date();
           data.createdBy = req.user.username;
           data.updatedBy = req.user.username;
-          data.updatedAt = new Date();
+          data.createdAt = now;
+          data.updatedAt = now;
           await collection.insertOne(data);
           inserts++;
         }
@@ -762,7 +834,8 @@ app.get('/api/stats', async (req, res, next) => {
     const collection = db.collection('dispositivos');
     const institucionesColl = db.collection('instituciones');
     
-    const total = await collection.countDocuments();
+    // Excluir de las estadísticas las placas generadas que aún no han sido asignadas
+    const total = await collection.countDocuments({ notas: { $ne: "Reserva - Generación de placa" } });
     const institucionesList = await institucionesColl.find().toArray();
     
     const sedesUnicas = new Set();
@@ -797,6 +870,144 @@ app.get('/api/stats', async (req, res, next) => {
       sedes: Array.from(sedesUnicas).sort(),
       instituciones: instNames.sort()
     });
+  } catch (err) { next(err); }
+});
+
+// --- Endpoints del Generador de Placas (Solo Admin) ---
+
+app.get('/api/placas/next-available', authenticateToken, requireAdmin, async (req, res, next) => {
+  try {
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+    
+    // Buscar la placa con el valor numérico más alto en la base de datos
+    const result = await collection.aggregate([
+      { $match: { placa: { $exists: true, $ne: "" } } },
+      {
+        $project: {
+          numericPlaca: {
+            $convert: {
+              input: "$placa",
+              to: "int",
+              onError: null,
+              onNull: null
+            }
+          }
+        }
+      },
+      { $match: { numericPlaca: { $ne: null } } },
+      { $group: { _id: null, maxPlaca: { $max: "$numericPlaca" } } }
+    ]).toArray();
+    
+    const nextPlaca = (result[0]?.maxPlaca || 0) + 1;
+    res.json({ nextPlaca });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/placas/generar-y-registrar', authenticateToken, requireAdmin, async (req, res, next) => {
+  try {
+    const { dispositivos, inicio, prefijo } = req.body;
+    if (!dispositivos || !Array.isArray(dispositivos) || dispositivos.length === 0) {
+      return res.status(400).json({ error: 'Lista de dispositivos no proporcionada o inválida' });
+    }
+    
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+    
+    // Obtener todas las placas existentes en la base de datos (evitar duplicados en memoria)
+    const allExistingDocs = await collection.find({}, { projection: { placa: 1 } }).toArray();
+    const existingPlaques = new Set(allExistingDocs.map(d => (d.placa || '').trim().toUpperCase()));
+    
+    const generated = [];
+    let currentNumber = parseInt(inicio) || 1;
+    const now = new Date();
+    
+    for (const item of dispositivos) {
+      const { tipo, cantidad } = item;
+      const qty = parseInt(cantidad) || 0;
+      if (qty <= 0 || !tipo) continue;
+      
+      for (let i = 0; i < qty; i++) {
+        let plaque = '';
+        while (true) {
+          plaque = `${prefijo || ''}${currentNumber}`;
+          if (!existingPlaques.has(plaque.trim().toUpperCase())) {
+            break;
+          }
+          currentNumber++;
+        }
+        existingPlaques.add(plaque.trim().toUpperCase());
+        generated.push({
+          dispositivo: tipo,
+          placa: plaque,
+          serial: "",
+          institucion: "",
+          sede: "",
+          aula: "",
+          modelo: "",
+          notas: "Reserva - Generación de placa",
+          createdBy: req.user.username,
+          updatedBy: req.user.username,
+          createdAt: now,
+          updatedAt: now
+        });
+        currentNumber++;
+      }
+    }
+    
+    if (generated.length === 0) {
+      return res.status(400).json({ error: 'No se pudo generar ninguna placa' });
+    }
+    
+    // Registrar las placas en la base de datos
+    await collection.insertMany(generated);
+    
+    // Crear el archivo Excel
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Placas Generadas');
+    
+    worksheet.columns = [
+      { header: 'Dispositivo', key: 'dispositivo', width: 30 },
+      { header: 'Placa', key: 'placa', width: 20 }
+    ];
+    
+    // Solo exportar nombre del dispositivo y placa
+    const excelRows = generated.map(g => ({ dispositivo: g.dispositivo, placa: g.placa }));
+    worksheet.addRows(excelRows);
+    
+    // Estilo encabezado
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4F46E5' } // Color Indigo
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    
+    // Bordes
+    worksheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      });
+    });
+    
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=placas_generadas.xlsx'
+    );
+    
+    await workbook.xlsx.write(res);
+    res.end();
   } catch (err) { next(err); }
 });
 

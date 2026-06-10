@@ -641,3 +641,16 @@ tr:hover {
   }
 }
 
+/* Grid responsive de 2 columnas para formularios */
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+

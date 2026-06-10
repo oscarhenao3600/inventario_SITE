@@ -86,6 +86,13 @@ const App = () => {
   const [roleError, setRoleError] = useState('');
   const [roleSuccess, setRoleSuccess] = useState('');
 
+  // Plaque Generator State
+  const [showPlacasModal, setShowPlacasModal] = useState(false);
+  const [lotePlacas, setLotePlacas] = useState([]);
+  const [placasConfig, setPlacasConfig] = useState({ inicio: '', prefijo: '' });
+  const [placasForm, setPlacasForm] = useState({ tipo: '', cantidad: '' });
+  const [generatingPlacas, setGeneratingPlacas] = useState(false);
+
   // Configurar Interceptor de Axios para incluir el Token
   useEffect(() => {
     const interceptor = axios.interceptors.request.use(
@@ -491,6 +498,19 @@ const App = () => {
     }
   };
 
+  const openPlacasModal = async () => {
+    setLotePlacas([]);
+    setPlacasForm({ tipo: '', cantidad: '' });
+    setPlacasConfig({ inicio: '', prefijo: '' });
+    setShowPlacasModal(true);
+    try {
+      const res = await axios.get('/api/placas/next-available');
+      setPlacasConfig({ inicio: res.data.nextPlaca.toString(), prefijo: '' });
+    } catch (err) {
+      console.error("Error fetching next available plaque", err);
+    }
+  };
+
   // ── Componente overlay reutilizable ─────────────────────────────────────────
   const isGlobalLoading = loadingSearch || loadingDupes || loadingSave || loadingExport || loadingExportTotal || importing;
 
@@ -599,7 +619,7 @@ const App = () => {
                 className="btn btn-chief"
                 onClick={() => { setShowCompModal(true); setCompData([]); setCompSede(''); }}
               >
-                <PieChart size={16} /><span>Dashboard Jefe</span>
+                <PieChart size={16} /><span>Referencia</span>
               </button>
               <button
                 className="btn btn-outline btn-chief-outline"
@@ -616,6 +636,9 @@ const App = () => {
               </button>
               <button className="btn btn-outline" onClick={() => setShowImportModal(true)} title="Importar desde Excel">
                 <FileUp size={16} /><span className="hide-mobile">Importar</span>
+              </button>
+              <button className="btn btn-outline" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }} onClick={openPlacasModal} title="Generar placas en lote">
+                <FileSpreadsheet size={16} /><span>Generar Placas</span>
               </button>
               <button className="btn btn-primary" onClick={() => openModal()}>
                 <Plus size={16} /><span>Nuevo</span>
@@ -1129,7 +1152,7 @@ const App = () => {
             </div>
             
             <form onSubmit={handleSave}>
-              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem'}}>
+              <div className="form-grid-2">
                 <div className="form-group">
                   <label>Placa *</label>
                   <input required value={formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} />
@@ -1186,7 +1209,7 @@ const App = () => {
                 />
               </div>
 
-              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem'}}>
+              <div className="form-grid-2">
                 <div className="form-group">
                   <label>Sede</label>
                   <input 
@@ -1558,6 +1581,202 @@ const App = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Generación de Placas */}
+      {showPlacasModal && (
+        <div className="modal-overlay">
+          <div className="modal glass-card" style={{ maxWidth: '650px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: '800', margin: 0 }}>Generar Placas en Lote</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.2rem' }}>Calcula placas consecutivas sin duplicados y descarga el Excel</p>
+              </div>
+              <button onClick={() => setShowPlacasModal(false)} style={{ background: 'var(--bg-input)', border: 'none', color: 'var(--text-main)', cursor: 'pointer', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="form-grid-2" style={{ marginBottom: '1.5rem' }}>
+              <div className="form-group">
+                <label>Número Inicial *</label>
+                <input 
+                  type="number" 
+                  value={placasConfig.inicio} 
+                  onChange={e => setPlacasConfig({ ...placasConfig, inicio: e.target.value })} 
+                  placeholder="Ej: 71053"
+                />
+              </div>
+              <div className="form-group">
+                <label>Prefijo Opcional</label>
+                <input 
+                  type="text" 
+                  value={placasConfig.prefijo} 
+                  onChange={e => setPlacasConfig({ ...placasConfig, prefijo: e.target.value })} 
+                  placeholder="Ej: SITE-"
+                />
+              </div>
+            </div>
+
+            <div className="glass-card" style={{ padding: '1.25rem', background: 'var(--bg-input)', marginBottom: '1.5rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '1rem' }}>Añadir Dispositivos al Lote</h3>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div style={{ flex: 2, minWidth: '200px' }}>
+                  <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem', fontWeight: '600' }}>Tipo de Dispositivo</label>
+                  <select 
+                    value={placasForm.tipo} 
+                    onChange={e => setPlacasForm({ ...placasForm, tipo: e.target.value })}
+                    style={{ 
+                      width: '100%', 
+                      padding: '0.75rem', 
+                      borderRadius: '0.6rem', 
+                      background: 'var(--bg-input)', 
+                      border: '1px solid var(--border)', 
+                      color: 'var(--text-main)',
+                      fontSize: '1rem'
+                    }}
+                  >
+                    <option value="">Seleccione un tipo...</option>
+                    {tiposDispositivo.map(tipo => (
+                      <option key={tipo} value={tipo}>{tipo}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: '100px' }}>
+                  <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem', fontWeight: '600' }}>Cantidad</label>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    value={placasForm.cantidad} 
+                    onChange={e => setPlacasForm({ ...placasForm, cantidad: e.target.value })}
+                    placeholder="Cant."
+                    style={{ 
+                      width: '100%', 
+                      padding: '0.75rem', 
+                      borderRadius: '0.6rem', 
+                      background: 'var(--bg-input)', 
+                      border: '1px solid var(--border)', 
+                      color: 'var(--text-main)', 
+                      margin: 0,
+                      fontSize: '1rem'
+                    }}
+                  />
+                </div>
+                <button 
+                  type="button" 
+                  className="btn btn-outline"
+                  style={{ padding: '0.75rem 1.2rem', height: '47px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={() => {
+                    if (!placasForm.tipo || !placasForm.cantidad || parseInt(placasForm.cantidad) <= 0) {
+                      alert("Por favor seleccione un tipo y cantidad válida.");
+                      return;
+                    }
+                    setLotePlacas(prev => {
+                      const existing = prev.find(item => item.tipo === placasForm.tipo);
+                      if (existing) {
+                        return prev.map(item => item.tipo === placasForm.tipo ? { ...item, cantidad: item.cantidad + parseInt(placasForm.cantidad) } : item);
+                      }
+                      return [...prev, { tipo: placasForm.tipo, cantidad: parseInt(placasForm.cantidad) }];
+                    });
+                    setPlacasForm({ tipo: '', cantidad: '' });
+                  }}
+                >
+                  Agregar
+                </button>
+              </div>
+            </div>
+
+            {lotePlacas.length > 0 && (
+              <div className="table-container" style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '1.5rem', border: '1px solid var(--border)' }}>
+                <table style={{ minWidth: '100%' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-input)' }}>
+                      <th style={{ padding: '0.75rem' }}>Dispositivo</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'center' }}>Cantidad</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'center' }}>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotePlacas.map((item, idx) => (
+                      <tr key={idx}>
+                        <td style={{ padding: '0.75rem', fontWeight: '600' }}>{item.tipo}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'center', fontWeight: '700' }}>{item.cantidad}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <button 
+                            type="button" 
+                            className="btn btn-outline" 
+                            style={{ padding: '0.3rem 0.5rem', borderColor: 'var(--danger)', color: 'var(--danger)' }}
+                            onClick={() => setLotePlacas(prev => prev.filter((_, i) => i !== idx))}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {generatingPlacas && (
+              <div style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1.25rem', fontSize: '0.85rem', fontWeight: '700', textAlign: 'center' }}>
+                Generando placas y registrando reservas... Por favor espera.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+              <button 
+                type="button" 
+                className="btn btn-outline" 
+                style={{ flex: 1 }}
+                onClick={() => setShowPlacasModal(false)}
+                disabled={generatingPlacas}
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                style={{ flex: 1 }}
+                disabled={generatingPlacas || lotePlacas.length === 0 || !placasConfig.inicio}
+                onClick={async () => {
+                  setGeneratingPlacas(true);
+                  try {
+                    const response = await axios.post('/api/placas/generar-y-registrar', {
+                      dispositivos: lotePlacas,
+                      inicio: parseInt(placasConfig.inicio),
+                      prefijo: placasConfig.prefijo
+                    }, {
+                      responseType: 'blob'
+                    });
+                    
+                    const url = window.URL.createObjectURL(new Blob([response.data]));
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.setAttribute('download', 'placas_generadas.xlsx');
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    
+                    alert("Placas generadas y registradas con éxito en la base de datos.");
+                    setShowPlacasModal(false);
+                    fetchStats();
+                    if (activeTab === 'search' && searchTerm) {
+                      handleSearch();
+                    }
+                  } catch (err) {
+                    console.error("Error generating plaques", err);
+                    alert("Ocurrió un error al generar las placas.");
+                  } finally {
+                    setGeneratingPlacas(false);
+                  }
+                }}
+              >
+                Generar y Descargar Excel
+              </button>
+            </div>
           </div>
         </div>
       )}
