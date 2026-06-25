@@ -59,6 +59,17 @@ async function connectDB() {
     await client.connect();
     console.log('Connected to MongoDB');
     db = client.db(dbName);
+    
+    // Migración automática: inicializar convenio como string vacío si no existe
+    const coll = db.collection('dispositivos');
+    const migrationResult = await coll.updateMany(
+      { convenio: { $exists: false } },
+      { $set: { convenio: "" } }
+    );
+    if (migrationResult.modifiedCount > 0) {
+      console.log(`Migrated ${migrationResult.modifiedCount} devices to have 'convenio' field.`);
+    }
+
     return db;
   } catch (err) {
     console.error('MongoDB connection error:', err);
@@ -271,7 +282,7 @@ app.delete('/api/dispositivos/:id', requireAdmin);
 // Buscar dispositivos (por placa o serial)
 app.get('/api/dispositivos', async (req, res, next) => {
   try {
-    const { q, tipo, institucion, sede, aula, verificacion } = req.query;
+    const { q, tipo, institucion, sede, aula, verificacion, convenio } = req.query;
     const db = await connectDB();
   const collection = db.collection('dispositivos');
   
@@ -289,6 +300,9 @@ app.get('/api/dispositivos', async (req, res, next) => {
   // Agregar filtro de tipo si se especifica
   if (tipo) {
     query.dispositivo = tipo;
+  }
+  if (convenio) {
+    query.convenio = convenio;
   }
   if (institucion) {
     query.institucion = { $regex: new RegExp(`^${institucion.trim()}$`, 'i') };
@@ -612,6 +626,7 @@ app.get('/api/exportar-total', authenticateToken, async (req, res, next) => {
       { header: 'Placa', key: 'placa', width: 15 },
       { header: 'Serial', key: 'serial', width: 20 },
       { header: 'Modelo', key: 'modelo', width: 15 },
+      { header: 'Convenio', key: 'convenio', width: 20 },
       { header: 'Notas', key: 'notes', width: 35 },
       { header: 'Actualizado Por', key: 'updatedBy', width: 20 },
       { header: 'Fecha de Creación', key: 'createdAtFormatted', width: 25 },
@@ -638,7 +653,7 @@ app.get('/api/exportar-total', authenticateToken, async (req, res, next) => {
     worksheet.addRows(rows);
 
     // Auto-filtro para facilitar la lectura
-    worksheet.autoFilter = 'A1:K1';
+    worksheet.autoFilter = 'A1:L1';
 
     // Formateo de celdas
     worksheet.eachRow((row, rowNumber) => {
@@ -689,6 +704,7 @@ app.post('/api/exportar', authenticateToken, async (req, res, next) => {
     { header: 'Institución', key: 'institucion', width: 30 },
     { header: 'Sede', key: 'sede', width: 20 },
     { header: 'Modelo', key: 'modelo', width: 15 },
+    { header: 'Convenio', key: 'convenio', width: 20 },
     { header: 'Notas', key: 'notas', width: 30 }
   ];
   
@@ -728,6 +744,17 @@ app.post('/api/importar', upload.single('archivo'), async (req, res) => {
     await workbook.xlsx.readFile(req.file.path);
     const worksheet = workbook.getWorksheet(1);
     
+    // Mapeo dinámico de columnas por cabecera
+    const headerRow = worksheet.getRow(1);
+    const headerMap = {};
+    headerRow.eachCell((cell, colNumber) => {
+      if (cell.value) {
+        const headerText = cell.value.toString().trim().toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        headerMap[headerText] = colNumber;
+      }
+    });
+
     let updates = 0;
     let inserts = 0;
     let errors = 0;
@@ -742,15 +769,26 @@ app.post('/api/importar', upload.single('archivo'), async (req, res) => {
 
     for (const row of rows) {
       try {
+        const getVal = (headerNames, defaultCol) => {
+          for (const name of headerNames) {
+            const col = headerMap[name];
+            if (col !== undefined) {
+              return row.getCell(col).text?.trim();
+            }
+          }
+          return row.getCell(defaultCol).text?.trim();
+        };
+
         const data = {
-          dispositivo: row.getCell(1).text?.trim(),
-          aula: row.getCell(2).text?.trim(),
-          placa: row.getCell(3).text?.trim(),
-          serial: row.getCell(4).text?.trim(),
-          institucion: row.getCell(5).text?.trim(),
-          sede: row.getCell(6).text?.trim(),
-          modelo: row.getCell(7).text?.trim(),
-          notas: row.getCell(8).text?.trim()
+          dispositivo: getVal(['dispositivo'], 1),
+          aula: getVal(['aula'], 2),
+          placa: getVal(['placa'], 3),
+          serial: getVal(['serial'], 4),
+          institucion: getVal(['institucion', 'institución', 'instutucion', 'instutución'], 5),
+          sede: getVal(['sede'], 6),
+          modelo: getVal(['modelo'], 7),
+          convenio: getVal(['convenio'], 8) || '',
+          notas: getVal(['notas', 'notes'], 9)
         };
 
         if (!data.placa && !data.serial) continue;
@@ -824,6 +862,16 @@ app.get('/api/tipos', async (req, res, next) => {
     const collection = db.collection('dispositivos');
     const tipos = await collection.distinct('dispositivo');
     res.json(tipos.filter(t => typeof t === 'string' && t.trim() !== ''));
+  } catch (err) { next(err); }
+});
+
+// Obtener convenios únicos
+app.get('/api/convenios', authenticateToken, async (req, res, next) => {
+  try {
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+    const convenios = await collection.distinct('convenio');
+    res.json(convenios.filter(c => typeof c === 'string' && c.trim() !== '').sort());
   } catch (err) { next(err); }
 });
 
@@ -945,6 +993,7 @@ app.post('/api/placas/generar-y-registrar', authenticateToken, requireAdmin, asy
           sede: "",
           aula: "",
           modelo: "",
+          convenio: "",
           notas: "Reserva - Generación de placa",
           createdBy: req.user.username,
           updatedBy: req.user.username,

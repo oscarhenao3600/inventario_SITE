@@ -42,6 +42,8 @@ const App = () => {
   const [importStats, setImportStats] = useState(null);
   const [tiposDispositivo, setTiposDispositivo] = useState([]);
   const [showOtroInput, setShowOtroInput] = useState(false);
+  const [convenios, setConvenios] = useState([]);
+  const [filtroConvenio, setFiltroConvenio] = useState('');
   
   // Advanced filters
   const [filtroInstitucion, setFiltroInstitucion] = useState('');
@@ -58,7 +60,7 @@ const App = () => {
   
   // Form State
   const [formData, setFormData] = useState({
-    placa: '', serial: '', dispositivo: '', institucion: '', sede: '', aula: '', modelo: '', notas: ''
+    placa: '', serial: '', dispositivo: '', institucion: '', sede: '', aula: '', modelo: '', convenio: '', notas: ''
   });
   const [validationError, setValidationError] = useState('');
   
@@ -126,6 +128,7 @@ const App = () => {
     if (token) {
       fetchStats();
       fetchTipos();
+      fetchConvenios();
     }
   }, [token]);
 
@@ -162,6 +165,15 @@ const App = () => {
     }
   };
 
+  const fetchConvenios = async () => {
+    try {
+      const res = await axios.get('/api/convenios');
+      setConvenios(res.data);
+    } catch (err) {
+      console.error("Error fetching convenios", err);
+    }
+  };
+
   const fetchStats = async () => {
     try {
       const res = await axios.get('/api/stats');
@@ -182,6 +194,7 @@ const App = () => {
       if (filtroSedeSearch) params.append('sede', filtroSedeSearch);
       if (filtroAulaSearch) params.append('aula', filtroAulaSearch);
       if (filtroVerificacion) params.append('verificacion', filtroVerificacion);
+      if (filtroConvenio) params.append('convenio', filtroConvenio);
 
       const res = await axios.get(`/api/dispositivos?${params.toString()}`);
       setDispositivos(res.data);
@@ -242,7 +255,7 @@ const App = () => {
       setShowOtroInput(isCustom);
     } else {
       setEditingDevice(null);
-      setFormData({ placa: '', serial: '', dispositivo: '', institucion: '', sede: '', aula: '', modelo: '', notas: '' });
+      setFormData({ placa: '', serial: '', dispositivo: '', institucion: '', sede: '', aula: '', modelo: '', convenio: '', notas: '' });
       setShowOtroInput(false);
     }
     setValidationError('');
@@ -287,6 +300,7 @@ const App = () => {
       }
       fetchStats();
       fetchTipos();
+      fetchConvenios();
     } catch (err) {
       console.error("Error saving", err);
     } finally {
@@ -457,6 +471,7 @@ const App = () => {
       setImportStats(res.data);
       fetchStats();
       fetchTipos();
+      fetchConvenios();
       if (activeTab === 'search' && searchTerm) handleSearch();
     } catch (err) {
       console.error("Error importing file", err);
@@ -775,8 +790,22 @@ const App = () => {
                     <option value="verificados">Temporales - Ya Verificados (Notas)</option>
                   </select>
                 </div>
+                <div style={{flex: 1, minWidth: '200px'}}>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem', fontWeight: '600'}}>Convenio</label>
+                  <select 
+                    className="search-input" 
+                    style={{margin: 0, padding: '0.6rem 1rem', width: '100%'}} 
+                    value={filtroConvenio}
+                    onChange={(e) => setFiltroConvenio(e.target.value)}
+                  >
+                    <option value="">Todos los convenios</option>
+                    {convenios.map(conv => (
+                      <option key={conv} value={conv}>{conv}</option>
+                    ))}
+                  </select>
+                </div>
                 <div style={{display: 'flex', alignItems: 'flex-end'}}>
-                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroAulaSearch(''); setFiltroTipoSearch(''); setFiltroVerificacion(''); setSearchTerm('');}}>
+                  <button className="btn btn-outline" onClick={() => {setFiltroInstitucion(''); setFiltroSedeSearch(''); setFiltroAulaSearch(''); setFiltroTipoSearch(''); setFiltroVerificacion(''); setFiltroConvenio(''); setSearchTerm('');}}>
                     Limpiar Filtros
                   </button>
                 </div>
@@ -820,6 +849,7 @@ const App = () => {
                   <th>Placa</th>
                   <th>Serial</th>
                   <th>Dispositivo</th>
+                  <th>Convenio</th>
                   <th>Institución / Sede</th>
                   <th>Aula</th>
                   {role === 'admin' && <th>Acciones</th>}
@@ -833,6 +863,7 @@ const App = () => {
                       <td><div className="skeleton-cell" style={{width: '80px'}}></div></td>
                       <td><div className="skeleton-cell" style={{width: '120px'}}></div></td>
                       <td><div className="skeleton-cell" style={{width: '160px'}}></div></td>
+                      <td><div className="skeleton-cell" style={{width: '100px'}}></div></td>
                       <td><div className="skeleton-cell" style={{width: '200px'}}></div></td>
                       <td><div className="skeleton-cell" style={{width: '100px'}}></div></td>
                       {role === 'admin' && <td><div className="skeleton-cell" style={{width: '60px'}}></div></td>}
@@ -869,6 +900,9 @@ const App = () => {
                           📝 {d.notas || d.notes}
                         </div>
                       )}
+                    </td>
+                    <td>
+                      <span style={{fontWeight: d.convenio ? '600' : 'normal'}}>{d.convenio || '-'}</span>
                     </td>
                     <td>
                       <div style={{fontSize: '0.9rem'}}>{d.institucion}</div>
@@ -1073,7 +1107,7 @@ const App = () => {
                           <div style={{fontWeight: '800', fontSize: '1.25rem', color: 'var(--text-main)'}}>
                             {item.device.dispositivo} - <span style={{color: 'var(--primary)'}}>{item.device.placa}</span>
                           </div>
-                          <div style={{fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500'}}>Sede: {item.device.sede} | Aula: {item.device.aula}</div>
+                          <div style={{fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500'}}>Sede: {item.device.sede} | Aula: {item.device.aula} | Convenio: {item.device.convenio || '-'}</div>
                         </div>
                         <div style={{borderLeft: '2px solid var(--border)', paddingLeft: '1.5rem'}}>
                            <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: '800', marginBottom: '0.25rem'}}>Identificación Recibida</div>
@@ -1102,6 +1136,7 @@ const App = () => {
                               <th style={{textAlign: 'center'}}>Aula</th>
                               <th style={{textAlign: 'center'}}>Placa / Serial</th>
                               <th>Tipo</th>
+                              <th>Convenio</th>
                               {role === 'admin' && <th style={{textAlign: 'center'}}>Acción</th>}
                             </tr>
                           </thead>
@@ -1120,6 +1155,7 @@ const App = () => {
                                   <div style={{fontSize: '0.7rem', opacity: 0.6}}>{dup.serial}</div>
                                 </td>
                                 <td>{dup.dispositivo}</td>
+                                <td>{dup.convenio || '-'}</td>
                                 {role === 'admin' && (
                                   <td style={{textAlign: 'center'}}>
                                     <button className="btn btn-outline" style={{padding: '0.3rem'}} onClick={() => openModal(dup)} title="Editar Registro Remoto">
@@ -1225,8 +1261,17 @@ const App = () => {
               </div>
 
               <div className="form-group">
+                <label>Convenio</label>
+                <input 
+                  value={formData.convenio || ''} 
+                  onChange={e => setFormData({...formData, convenio: e.target.value})} 
+                  disabled={role !== 'admin'}
+                  placeholder="Ej: Convenio Aulas SITE"
+                />
+              </div>
+              <div className="form-group">
                 <label>Notas / Observaciones</label>
-                <textarea rows="3" value={formData.notas || ''} onChange={e => setFormData({...formData, notas: e.target.value})} />
+                <textarea rows="3" value={formData.notes || formData.notas || ''} onChange={e => setFormData({...formData, notas: e.target.value})} />
               </div>
 
               <div style={{display: 'flex', gap: '1rem', marginTop: '2rem'}}>
@@ -1259,7 +1304,7 @@ const App = () => {
                   Sube un archivo Excel (.xlsx) con las columnas en este orden:
                   <br /><br />
                   <code style={{fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '5px', borderRadius: '4px'}}>
-                    Dispositivo, Aula, Placa, Serial, Institución, Sede, Modelo, Notas
+                    Dispositivo, Aula, Placa, Serial, Institución, Sede, Modelo, Convenio, Notas
                   </code>
                 </p>
                 
@@ -1763,6 +1808,7 @@ const App = () => {
                     alert("Placas generadas y registradas con éxito en la base de datos.");
                     setShowPlacasModal(false);
                     fetchStats();
+                    fetchConvenios();
                     if (activeTab === 'search' && searchTerm) {
                       handleSearch();
                     }
