@@ -44,6 +44,8 @@ const App = () => {
   const [showOtroInput, setShowOtroInput] = useState(false);
   const [convenios, setConvenios] = useState([]);
   const [filtroConvenio, setFiltroConvenio] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 100;
   
   // Advanced filters
   const [filtroInstitucion, setFiltroInstitucion] = useState('');
@@ -198,6 +200,7 @@ const App = () => {
 
       const res = await axios.get(`/api/dispositivos?${params.toString()}`);
       setDispositivos(res.data);
+      setCurrentPage(1);
     } catch (err) {
       console.error("Error searching", err);
     } finally {
@@ -495,6 +498,7 @@ const App = () => {
     setIsChief(false);
     setDispositivos([]);
     setDuplicados([]);
+    setCurrentPage(1);
   };
 
   const fetchComparativo = async () => {
@@ -525,6 +529,10 @@ const App = () => {
       console.error("Error fetching next available plaque", err);
     }
   };
+
+  const totalPages = Math.ceil(dispositivos.length / ITEMS_PER_PAGE) || 1;
+  const activePage = Math.max(1, Math.min(currentPage, totalPages));
+  const currentDispositivos = dispositivos.slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE);
 
   // ── Componente overlay reutilizable ─────────────────────────────────────────
   const isGlobalLoading = loadingSearch || loadingDupes || loadingSave || loadingExport || loadingExportTotal || importing;
@@ -870,7 +878,7 @@ const App = () => {
                     </tr>
                   ))
                 ) : (
-                  dispositivos.map(d => (
+                  currentDispositivos.map(d => (
                   <tr key={d._id}>
                     <td>
                       <div style={{display: 'flex', flexDirection: 'column', gap: '0.2rem'}}>
@@ -927,6 +935,38 @@ const App = () => {
               </tbody>
             </table>
           </div>
+
+          {totalPages > 1 && (
+            <div style={{display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem', flexWrap: 'wrap'}}>
+              <button 
+                className="btn btn-outline" 
+                onClick={() => {
+                  setCurrentPage(prev => Math.max(prev - 1, 1));
+                  const el = document.querySelector('.table-container');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }} 
+                disabled={activePage === 1}
+                style={{padding: '0.4rem 1rem', fontSize: '0.85rem'}}
+              >
+                Anterior
+              </button>
+              <span style={{fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500'}}>
+                Página <strong>{activePage}</strong> de {totalPages} ({dispositivos.length} resultados)
+              </span>
+              <button 
+                className="btn btn-outline" 
+                onClick={() => {
+                  setCurrentPage(prev => Math.min(prev + 1, totalPages));
+                  const el = document.querySelector('.table-container');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }} 
+                disabled={activePage === totalPages}
+                style={{padding: '0.4rem 1rem', fontSize: '0.85rem'}}
+              >
+                Siguiente
+              </button>
+            </div>
+          )}
         </section>
       ) : (
         <section>

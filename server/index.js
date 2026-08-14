@@ -354,7 +354,7 @@ app.get('/api/dispositivos', async (req, res, next) => {
   
   // Limitar resultados a 200 cuando no hay ningún filtro de búsqueda específico activo
   // Esto previene la congelación en Chrome al cargar miles de registros a la vez
-  const hasFilters = q || tipo || institucion || sede || aula || verificacion;
+  const hasFilters = q || tipo || institucion || sede || aula || verificacion || convenio;
   if (!hasFilters) {
     cursor = cursor.limit(200);
   }
