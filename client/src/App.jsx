@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download, LogOut, Lock, User, Users } from 'lucide-react';
+import { Search, Plus, Edit2, AlertCircle, FileSpreadsheet, Filter, Check, X, Trash2, PieChart, FileUp, Download, LogOut, Lock, User, Users, Link2, Monitor, Tablet, Server, ShoppingCart, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 const noSerialTypes = [
   "Servidor Portable de Aula SITE Sistema Cloud",
@@ -97,6 +97,26 @@ const App = () => {
   const [placasForm, setPlacasForm] = useState({ tipo: '', cantidad: '' });
   const [generatingPlacas, setGeneratingPlacas] = useState(false);
 
+  // Estados de Búsqueda Vinculada (Exclusivo isChief)
+  const [linkedSearchTerm, setLinkedSearchTerm] = useState('');
+  const [selectedTipos, setSelectedTipos] = useState([
+    'Pantalla Interactiva Táctil',
+    'Tablet Para Docentes',
+    'Tablet Para Estudiantes',
+    'Carro Cargador de Tabletas',
+    'Servidor Portable de Aula SITE Sistema Cloud',
+    'Soporte Electrónico Pantalla Interactiva Táctil'
+  ]);
+  const [filtroInstitucionLinked, setFiltroInstitucionLinked] = useState('');
+  const [filtroSedeLinked, setFiltroSedeLinked] = useState('');
+  const [filtroAulaLinked, setFiltroAulaLinked] = useState('');
+  const [filtroConvenioLinked, setFiltroConvenioLinked] = useState('');
+  const [linkedResultados, setLinkedResultados] = useState([]);
+  const [loadingLinkedSearch, setLoadingLinkedSearch] = useState(false);
+  const [loadingExportLinked, setLoadingExportLinked] = useState(false);
+  const [hasSearchedLinked, setHasSearchedLinked] = useState(false);
+  const [aulasLinked, setAulasLinked] = useState([]);
+
   // Configurar Interceptor de Axios para incluir el Token
   useEffect(() => {
     const interceptor = axios.interceptors.request.use(
@@ -157,6 +177,18 @@ const App = () => {
       fetchAulas();
     }
   }, [filtroSede, token]);
+
+  useEffect(() => {
+    if (token && isChief) {
+      const fetchAulas = async () => {
+        try {
+          const res = await axios.get(`/api/aulas${filtroSedeLinked ? `?sede=${encodeURIComponent(filtroSedeLinked)}` : ''}`);
+          setAulasLinked(res.data);
+        } catch (err) { console.error("Error fetching aulas linked", err); }
+      };
+      fetchAulas();
+    }
+  }, [filtroSedeLinked, token, isChief]);
 
   const fetchTipos = async () => {
     try {
@@ -290,6 +322,25 @@ const App = () => {
         await axios.put(`/api/dispositivos/${editingDevice._id}`, formData);
         savedDevice = { ...formData, _id: editingDevice._id };
         setDispositivos(prev => prev.map(d => d._id === editingDevice._id ? savedDevice : d));
+
+        // Actualizar de forma inmediata los registros en la Búsqueda Vinculada
+        setLinkedResultados(prev => prev.map(item => {
+          let updated = item._id === editingDevice._id ? { ...item, ...savedDevice } : { ...item };
+          if (updated.vinculado) {
+            const v = { ...updated.vinculado };
+            if (v.servidor?._id === editingDevice._id) v.servidor = { ...v.servidor, ...savedDevice };
+            if (v.soporte?._id === editingDevice._id) v.soporte = { ...v.soporte, ...savedDevice };
+            if (v.carroCargador?._id === editingDevice._id) v.carroCargador = { ...v.carroCargador, ...savedDevice };
+            if (v.pantalla?._id === editingDevice._id) v.pantalla = { ...v.pantalla, ...savedDevice };
+            if (Array.isArray(v.equiposAulaSinMuebles)) {
+              v.equiposAulaSinMuebles = v.equiposAulaSinMuebles.map(eq =>
+                eq._id === editingDevice._id ? { ...eq, ...savedDevice } : eq
+              );
+            }
+            updated.vinculado = v;
+          }
+          return updated;
+        }));
       } else {
         const postRes = await axios.post('/api/dispositivos', formData);
         const insertedId = postRes.data.insertedId || postRes.data._id;
@@ -300,6 +351,9 @@ const App = () => {
       setShowModal(false);
       if (activeTab === 'dupes') {
         fetchDuplicados();
+      }
+      if (activeTab === 'linked') {
+        handleLinkedSearch();
       }
       fetchStats();
       fetchTipos();
@@ -381,6 +435,102 @@ const App = () => {
 
     exportToExcel(docsToExport);
   };
+
+  // Controladores de Búsqueda Vinculada (isChief)
+  const handleLinkedSearch = async () => {
+    setLoadingLinkedSearch(true);
+    setLoadingMsg('Consultando y resolviendo vinculaciones...');
+    try {
+      const params = new URLSearchParams();
+      if (linkedSearchTerm.trim()) params.append('q', linkedSearchTerm.trim());
+      if (selectedTipos.length > 0) params.append('tipos', selectedTipos.join(','));
+      if (filtroInstitucionLinked.trim()) params.append('institucion', filtroInstitucionLinked.trim());
+      if (filtroSedeLinked.trim()) params.append('sede', filtroSedeLinked.trim());
+      if (filtroAulaLinked.trim()) params.append('aula', filtroAulaLinked.trim());
+      if (filtroConvenioLinked.trim()) params.append('convenio', filtroConvenioLinked.trim());
+
+      const res = await axios.get(`/api/chief/busqueda-vinculada?${params.toString()}`);
+      setLinkedResultados(res.data.resultados || []);
+      setHasSearchedLinked(true);
+    } catch (err) {
+      console.error("Error searching linked", err);
+      alert(err.response?.data?.error || "Error al realizar la búsqueda vinculada.");
+    } finally {
+      setLoadingLinkedSearch(false);
+      setLoadingMsg('');
+    }
+  };
+
+  const handleExportLinked = async () => {
+    if (!linkedResultados || linkedResultados.length === 0) {
+      alert("No hay resultados para exportar.");
+      return;
+    }
+    setLoadingExportLinked(true);
+    setLoadingMsg('Exportando relaciones a Excel...');
+    try {
+      const response = await axios.post('/api/chief/exportar-vinculados', {
+        resultados: linkedResultados
+      }, {
+        responseType: 'blob',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'inventario_vinculado.xlsx');
+      document.body.appendChild(link);
+      link.click();
+    } catch (err) {
+      console.error("Error exporting linked", err);
+      alert("Error al exportar los datos vinculados.");
+    } finally {
+      setLoadingExportLinked(false);
+      setLoadingMsg('');
+    }
+  };
+
+  const toggleTipoSeleccionado = (tipo) => {
+    setSelectedTipos(prev => 
+      prev.includes(tipo) ? prev.filter(t => t !== tipo) : [...prev, tipo]
+    );
+  };
+
+  const selectAllTipos = () => {
+    setSelectedTipos([
+      'Pantalla Interactiva Táctil',
+      'Tablet Para Docentes',
+      'Tablet Para Estudiantes',
+      'Carro Cargador de Tabletas',
+      'Servidor Portable de Aula SITE Sistema Cloud',
+      'Soporte Electrónico Pantalla Interactiva Táctil'
+    ]);
+  };
+
+  const deselectAllTipos = () => {
+    setSelectedTipos([]);
+  };
+
+  const clearLinkedFilters = () => {
+    setLinkedSearchTerm('');
+    setFiltroInstitucionLinked('');
+    setFiltroSedeLinked('');
+    setFiltroAulaLinked('');
+    setFiltroConvenioLinked('');
+    selectAllTipos();
+  };
+
+  const availableDeviceTypes = [
+    { tipo: 'Pantalla Interactiva Táctil', label: 'Pantalla Interactiva Táctil' },
+    { tipo: 'Tablet Para Docentes', label: 'Tablet Para Docentes' },
+    { tipo: 'Tablet Para Estudiantes', label: 'Tablet Para Estudiantes' },
+    { tipo: 'Carro Cargador de Tabletas', label: 'Carro Cargador de Tabletas' },
+    { tipo: 'Servidor Portable de Aula SITE Sistema Cloud', label: 'Servidor Portable SITE' },
+    { tipo: 'Soporte Electrónico Pantalla Interactiva Táctil', label: 'Soporte Electrónico' }
+  ];
+
+
+
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -708,14 +858,22 @@ const App = () => {
         <button 
           className={`tab-btn ${activeTab === 'search' ? 'active' : ''}`}
           onClick={() => setActiveTab('search')}
-        >🔍 Buscador</button>
+        >Buscador</button>
         <button 
           className={`tab-btn ${activeTab === 'dupes' ? 'active' : ''}`}
           onClick={() => setActiveTab('dupes')}
-        >⚠️ Duplicados</button>
+        >Duplicados</button>
+        {isChief && (
+          <button 
+            className={`tab-btn ${activeTab === 'linked' ? 'active' : ''}`}
+            onClick={() => setActiveTab('linked')}
+          >
+            Búsqueda Vinculada
+          </button>
+        )}
       </div>
 
-      {activeTab === 'search' ? (
+      {activeTab === 'search' && (
         <section className="glass-card">
           <div className="search-container" style={{marginBottom: '2rem'}}>
             <div className="search-input-wrapper">
@@ -736,7 +894,7 @@ const App = () => {
           </div>
 
           <div className="glass-card" style={{padding: '1.25rem', marginBottom: '2rem', background: 'var(--border)'}}>
-             <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap'}}>
+             <div className="filters-grid" style={{display: 'flex', gap: '1rem', flexWrap: 'wrap'}}>
                 <div style={{flex: 1, minWidth: '200px'}}>
                   <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Institución</label>
                   <input 
@@ -889,7 +1047,7 @@ const App = () => {
                           )}
                         </div>
                         {hasTemporalSuffix(d.placa) && (
-                          <span style={{fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 'bold'}}>⚠️ Placa Temp</span>
+                          <span style={{fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 'bold'}}>Placa Temp</span>
                         )}
                       </div>
                     </td>
@@ -897,7 +1055,7 @@ const App = () => {
                       <div style={{display: 'flex', flexDirection: 'column', gap: '0.2rem'}}>
                         <span style={{color: hasTemporalSuffix(d.serial) ? 'var(--warning)' : 'inherit', fontWeight: hasTemporalSuffix(d.serial) ? '700' : 'normal'}}>{d.serial}</span>
                         {hasTemporalSuffix(d.serial) && (
-                          <span style={{fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 'bold'}}>⚠️ Serial Temp</span>
+                          <span style={{fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 'bold'}}>Serial Temp</span>
                         )}
                       </div>
                     </td>
@@ -905,7 +1063,7 @@ const App = () => {
                       <div>{d.dispositivo}</div>
                       {(d.notas || d.notes) && (d.notas || d.notes).trim() !== '' && (
                         <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={d.notas || d.notes}>
-                          📝 {d.notas || d.notes}
+                          {d.notas || d.notes}
                         </div>
                       )}
                     </td>
@@ -968,7 +1126,9 @@ const App = () => {
             </div>
           )}
         </section>
-      ) : (
+      )}
+
+      {activeTab === 'dupes' && (
         <section>
           <div className="stats-grid">
             <div className={`glass-card stat-item ${dupField === 'placa' ? 'active-border' : ''}`} onClick={() => setDupField('placa')} style={{cursor: 'pointer'}}>
@@ -982,7 +1142,7 @@ const App = () => {
           </div>
 
           <div className="glass-card" style={{marginBottom: '2rem'}}>
-            <div style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end'}}>
+            <div className="filters-grid" style={{display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end'}}>
               <div style={{flex: 1, minWidth: '200px'}}>
                 <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem'}}>Filtrar por Sede</label>
                 <div style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
@@ -1217,6 +1377,588 @@ const App = () => {
         </section>
       )}
 
+      {activeTab === 'linked' && isChief && (
+        <section className="glass-card" style={{ padding: '1.5rem' }}>
+          {/* Header informativo */}
+          <div className="linked-search-header">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <h2 style={{ fontSize: '1.35rem', fontWeight: '800', margin: 0 }}>Búsqueda Vinculada</h2>
+                <span className="badge-tag badge-primary-soft">isChief</span>
+              </div>
+              <div className="linked-rules-pills">
+                <span className="linked-rule-pill">
+                  Pantalla: vincula Servidor y Soporte del aula
+                </span>
+                <span className="linked-rule-pill">
+                  Tablet: vincula Carro Cargador asignado
+                </span>
+                <span className="linked-rule-pill">
+                  Docente sin carro: vincula Pantalla y equipos del aula (sin mesas ni sillas)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de búsqueda por texto */}
+          <div className="search-container" style={{ marginBottom: '1.25rem' }}>
+            <div className="search-input-wrapper">
+              <Search className="search-icon" size={20} />
+              <input 
+                type="text" 
+                className="search-input" 
+                placeholder="Buscar por placa o serial (ej: ISH20230610071, AD813230312360)..." 
+                value={linkedSearchTerm}
+                onChange={(e) => setLinkedSearchTerm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLinkedSearch()}
+              />
+            </div>
+            <button 
+              className={`btn btn-primary${loadingLinkedSearch ? ' btn-loading' : ''}`} 
+              onClick={handleLinkedSearch} 
+              style={{ minWidth: '180px' }} 
+              disabled={loadingLinkedSearch}
+            >
+              {loadingLinkedSearch ? <span className="spinner spinner-sm"></span> : <Search size={18} />}
+              {loadingLinkedSearch ? 'Consultando...' : 'Consultar Relaciones'}
+            </button>
+          </div>
+
+          {/* Selección Múltiple con Checkboxes por Tipo de Dispositivo */}
+          <div className="glass-card" style={{ padding: '1rem 1.25rem', marginBottom: '1.25rem', background: 'var(--bg-input)' }}>
+            <div className="device-chips-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                Dispositivos a buscar:
+              </label>
+              <div className="device-chips-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                <button type="button" className="btn btn-outline" style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }} onClick={selectAllTipos}>
+                  Seleccionar Todos
+                </button>
+                <button type="button" className="btn btn-outline" style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }} onClick={deselectAllTipos}>
+                  Deseleccionar
+                </button>
+              </div>
+            </div>
+
+            <div className="chip-group">
+              {availableDeviceTypes.map(item => {
+                const isSelected = selectedTipos.includes(item.tipo);
+                return (
+                  <button
+                    key={item.tipo}
+                    type="button"
+                    className={`device-chip ${isSelected ? 'active' : ''}`}
+                    onClick={() => toggleTipoSeleccionado(item.tipo)}
+                  >
+                    <div className="device-chip-checkbox">
+                      {isSelected ? <Check size={12} strokeWidth={3} /> : null}
+                    </div>
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Filtros complementarios (Institución, Sede, Aula, Convenio) */}
+          <div className="glass-card" style={{ padding: '1.25rem', marginBottom: '2rem', background: 'var(--border)' }}>
+            <div className="filters-grid" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: '180px' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Institución</label>
+                <input 
+                  className="search-input" 
+                  list="instituciones-list"
+                  style={{ margin: 0, padding: '0.5rem' }} 
+                  placeholder="Ej: BOSQUES DE PINARES..."
+                  value={filtroInstitucionLinked}
+                  onChange={(e) => setFiltroInstitucionLinked(e.target.value.toUpperCase())}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: '180px' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Sede</label>
+                <input 
+                  className="search-input" 
+                  list="sedes-list"
+                  style={{ margin: 0, padding: '0.5rem' }} 
+                  placeholder="Ej: SEDE PRINCIPAL..."
+                  value={filtroSedeLinked}
+                  onChange={(e) => setFiltroSedeLinked(e.target.value.toUpperCase())}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: '180px' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Aula</label>
+                <input 
+                  className="search-input" 
+                  list="aulas-linked-list"
+                  style={{ margin: 0, padding: '0.5rem' }} 
+                  placeholder="Ej: Aula 1..."
+                  value={filtroAulaLinked}
+                  onChange={(e) => setFiltroAulaLinked(e.target.value.toUpperCase())}
+                />
+                <datalist id="aulas-linked-list">
+                  {aulasLinked.map(aula => (
+                    <option key={aula} value={aula} />
+                  ))}
+                </datalist>
+              </div>
+              <div style={{ flex: 1, minWidth: '180px' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Convenio</label>
+                <select 
+                  className="search-input" 
+                  style={{ margin: 0, padding: '0.6rem 1rem', width: '100%' }} 
+                  value={filtroConvenioLinked}
+                  onChange={(e) => setFiltroConvenioLinked(e.target.value)}
+                >
+                  <option value="">Todos los convenios</option>
+                  {convenios.map(conv => (
+                    <option key={conv} value={conv}>{conv}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem' }}>
+                <button className="btn btn-outline" onClick={clearLinkedFilters} title="Restablecer filtros">
+                  Limpiar Filtros
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de resultados y exportación */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+            <h3 style={{ color: 'var(--text-muted)', fontSize: '0.95rem', fontWeight: '600' }}>
+              {hasSearchedLinked ? `${linkedResultados.length} dispositivos encontrados con sus asociaciones resueltas` : 'Introduce un serial o placa para consultar relaciones'}
+            </h3>
+            {linkedResultados.length > 0 && (
+              <button 
+                className={`btn btn-outline btn-mobile-full${loadingExportLinked ? ' btn-loading' : ''}`} 
+                onClick={handleExportLinked}
+                disabled={loadingExportLinked}
+              >
+                {loadingExportLinked ? <span className="spinner spinner-sm"></span> : <FileSpreadsheet size={18} />}
+                Exportar Relaciones a Excel
+              </button>
+            )}
+          </div>
+
+          {/* Listado de Resultados Vinculados */}
+          {loadingLinkedSearch ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={`skel-linked-${i}`} className="glass-card" style={{ padding: '1.5rem', opacity: 0.6 }}>
+                  <div className="skeleton-cell" style={{ width: '30%', height: '24px', marginBottom: '1rem' }}></div>
+                  <div className="skeleton-cell" style={{ width: '100%', height: '60px' }}></div>
+                </div>
+              ))}
+            </div>
+          ) : linkedResultados.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {linkedResultados.map((item) => (
+                <div key={item._id} className="linked-card">
+                  {/* Encabezado de la Tarjeta */}
+                  <div className="linked-card-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: '700', color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                        {item.institucion}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)' }}>•</span>
+                      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>
+                        {item.sede}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)' }}>•</span>
+                      <span style={{ fontWeight: '700', color: 'var(--primary)', background: 'rgba(99, 102, 241, 0.08)', padding: '0.2rem 0.6rem', borderRadius: '0.4rem' }}>
+                        {item.aula}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {item.convenio && (
+                        <span className="badge-tag">Convenio: {item.convenio}</span>
+                      )}
+                      {item.tipoRelacion === 'pantalla_kit' && (
+                        <span className="badge-tag badge-primary-soft">Kit Pantalla + Servidor + Soporte</span>
+                      )}
+                      {item.tipoRelacion === 'tablet_con_carro' && (
+                        <span className="badge-tag badge-success-soft">Vinculada a Carro Cargador</span>
+                      )}
+                      {item.tipoRelacion === 'tablet_docente_sin_carro' && (
+                        <span className="badge-tag badge-warning-soft">Docente sin carro: Vinculada a Pantalla</span>
+                      )}
+                      {item.tipoRelacion === 'tablet_estudiante_sin_carro' && (
+                        <span className="badge-tag badge-danger-soft">Tablet sin Carro en Aula</span>
+                      )}
+                      {item.tipoRelacion === 'carro_cargador' && (
+                        <span className="badge-tag badge-cyan-soft">Carro Cargador ({item.vinculado?.totalTabletsEnAula || 0} tablets)</span>
+                      )}
+                      {item.tipoRelacion === 'componente_pantalla' && (
+                        <span className="badge-tag badge-primary-soft">Kit Pantalla Interactiva</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Cuerpo de la Tarjeta (Dispositivo Principal vs Equipos Vinculados) */}
+                  <div className="linked-card-body">
+                    {/* Dispositivo Consultado */}
+                    <div className="linked-primary-section">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                        <div>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.05em' }}>
+                            Dispositivo Consultado
+                          </span>
+                          <h4 style={{ margin: '0.2rem 0 0.5rem', fontSize: '1.05rem', color: 'var(--text-main)', fontWeight: '700' }}>
+                            {item.dispositivo}
+                          </h4>
+                        </div>
+                        <button 
+                          className="btn btn-outline" 
+                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}
+                          onClick={() => openModal(item)}
+                          title={`Editar ${item.dispositivo}`}
+                        >
+                          <Edit2 size={13} />
+                          <span>Editar</span>
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>PLACA</span>
+                          <strong style={{ fontSize: '1.05rem', color: 'var(--primary)' }}>{item.placa || 'SIN PLACA'}</strong>
+                        </div>
+                        <div style={{ borderLeft: '1px solid var(--border)', paddingLeft: '1rem' }}>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>SERIAL</span>
+                          <strong style={{ fontSize: '1.05rem', fontFamily: 'monospace', color: 'var(--text-main)' }}>{item.serial || 'SIN SERIAL'}</strong>
+                        </div>
+                        {item.modelo && (
+                          <div style={{ borderLeft: '1px solid var(--border)', paddingLeft: '1rem' }}>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>MODELO</span>
+                            <span style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{item.modelo}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {item.notas && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '0.45rem 0.75rem', borderRadius: '0.4rem', borderLeft: '3px solid var(--border)' }}>
+                          Nota: {item.notas}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Equipos Asociados en esa Aula */}
+                    <div className="linked-associated-section">
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.05em' }}>
+                        Equipos Vinculados en el Aula ({item.aula})
+                      </span>
+
+                      {/* Caso Pantalla Kit: Servidor + Soporte */}
+                      {item.tipoRelacion === 'pantalla_kit' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {item.vinculado?.servidor ? (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Servidor Portable de Aula SITE</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.servidor.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.servidor.serial || 'Sin serial'}</strong>
+                                  {item.vinculado.servidor.modelo ? ` | Modelo: ${item.vinculado.servidor.modelo}` : ''}
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.servidor)}
+                                title="Editar Servidor Portable"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="linked-box" style={{ opacity: 0.65, borderStyle: 'dashed' }}>
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>Servidor Portable no registrado en esta aula</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {item.vinculado?.soporte ? (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Soporte Electrónico Pantalla Interactiva</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.soporte.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.soporte.serial || 'Sin serial'}</strong>
+                                  {item.vinculado.soporte.modelo ? ` | Modelo: ${item.vinculado.soporte.modelo}` : ''}
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.soporte)}
+                                title="Editar Soporte Electrónico"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="linked-box" style={{ opacity: 0.65, borderStyle: 'dashed' }}>
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>Soporte Electrónico no registrado en esta aula</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Caso Tablet con Carro */}
+                      {item.tipoRelacion === 'tablet_con_carro' && (
+                        <div className="linked-box">
+                          <div className="linked-box-content">
+                            <div style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text-main)' }}>Carro Cargador de Tabletas Asignado</div>
+                            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                              Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado?.carroCargador?.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado?.carroCargador?.serial || 'Sin serial'}</strong>
+                              {item.vinculado?.carroCargador?.modelo ? ` | Modelo: ${item.vinculado.carroCargador.modelo}` : ''}
+                            </div>
+                          </div>
+                          {item.vinculado?.carroCargador && (
+                            <button 
+                              className="btn btn-outline" 
+                              style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                              onClick={() => openModal(item.vinculado.carroCargador)}
+                              title="Editar Carro Cargador"
+                            >
+                              <Edit2 size={12} />
+                              <span>Editar</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Caso Tablet Docente SIN Carro */}
+                      {item.tipoRelacion === 'tablet_docente_sin_carro' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          <div style={{ padding: '0.5rem 0.75rem', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '0.5rem', fontSize: '0.8rem', color: 'var(--warning)' }}>
+                            Esta tablet docente no cuenta con carro en el aula. Queda ligada a la Pantalla y equipos del aula (excluyendo mesas y sillas).
+                          </div>
+
+                          {item.vinculado?.pantalla && (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Pantalla Interactiva Táctil</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.pantalla.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.pantalla.serial || 'Sin serial'}</strong>
+                                  {item.vinculado.pantalla.modelo ? ` | Modelo: ${item.vinculado.pantalla.modelo}` : ''}
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.pantalla)}
+                                title="Editar Pantalla Interactiva"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {item.vinculado?.servidor && (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Servidor Portable de Aula SITE</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.servidor.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.servidor.serial || 'Sin serial'}</strong>
+                                  {item.vinculado.servidor.modelo ? ` | Modelo: ${item.vinculado.servidor.modelo}` : ''}
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.servidor)}
+                                title="Editar Servidor Portable"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {item.vinculado?.soporte && (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Soporte Electrónico Pantalla</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.soporte.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.soporte.serial || 'Sin serial'}</strong>
+                                  {item.vinculado.soporte.modelo ? ` | Modelo: ${item.vinculado.soporte.modelo}` : ''}
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.soporte)}
+                                title="Editar Soporte Electrónico"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {item.vinculado?.equiposAulaSinMuebles?.length > 0 && (
+                            <div style={{ marginTop: '0.4rem' }}>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '700', marginBottom: '0.35rem' }}>
+                                Otros equipos en el aula (sin mesas ni sillas):
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                {item.vinculado.equiposAulaSinMuebles.map(eq => (
+                                  <div key={eq._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-input)', padding: '0.4rem 0.75rem', borderRadius: '0.4rem', border: '1px solid var(--border)' }}>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-main)' }}>
+                                      <strong>{eq.dispositivo}</strong> &nbsp;|&nbsp; Placa: {eq.placa || 'S/P'} &nbsp;|&nbsp; Serial: <span style={{ fontFamily: 'monospace' }}>{eq.serial || 'S/S'}</span>
+                                    </div>
+                                    <button 
+                                      className="btn btn-outline" 
+                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}
+                                      onClick={() => openModal(eq)}
+                                      title={`Editar ${eq.dispositivo}`}
+                                    >
+                                      <Edit2 size={11} />
+                                      <span>Editar</span>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Caso Tablet Estudiante SIN Carro */}
+                      {item.tipoRelacion === 'tablet_estudiante_sin_carro' && (
+                        <div className="linked-box" style={{ background: 'rgba(239, 68, 68, 0.04)', borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+                          <div className="linked-box-content">
+                            <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--danger)' }}>Sin Carro Cargador Registrado</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>No se encontró un carro cargador de tabletas en el aula {item.aula}.</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Caso Carro Cargador */}
+                      {item.tipoRelacion === 'carro_cargador' && (
+                        <div className="linked-box">
+                          <div className="linked-box-content">
+                            <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Tablets en esta Aula</div>
+                            <div style={{ fontSize: '0.82rem', color: 'var(--text-main)', marginTop: '0.15rem' }}>
+                              Total asociadas al aula: <strong>{item.vinculado?.totalTabletsEnAula || 0} tabletas</strong>
+                            </div>
+                            {item.vinculado?.pantalla && (
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                Pantalla en aula: Placa {item.vinculado.pantalla.placa} | Serial {item.vinculado.pantalla.serial}
+                              </div>
+                            )}
+                          </div>
+                          {item.vinculado?.pantalla && (
+                            <button 
+                              className="btn btn-outline" 
+                              style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                              onClick={() => openModal(item.vinculado.pantalla)}
+                              title="Editar Pantalla"
+                            >
+                              <Edit2 size={12} />
+                              <span>Editar</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Caso Componente Pantalla */}
+                      {item.tipoRelacion === 'componente_pantalla' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {item.vinculado?.pantalla && (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Pantalla Interactiva Vinculada</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.pantalla.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.pantalla.serial || 'Sin serial'}</strong>
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.pantalla)}
+                                title="Editar Pantalla"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {item.dispositivo === 'Soporte Electrónico Pantalla Interactiva Táctil' && item.vinculado?.servidor && (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Servidor Portable de Aula SITE</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.servidor.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.servidor.serial || 'Sin serial'}</strong>
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.servidor)}
+                                title="Editar Servidor"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {item.dispositivo === 'Servidor Portable de Aula SITE Sistema Cloud' && item.vinculado?.soporte && (
+                            <div className="linked-box">
+                              <div className="linked-box-content">
+                                <div style={{ fontWeight: '600', fontSize: '0.88rem', color: 'var(--text-main)' }}>Soporte Electrónico Pantalla</div>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Placa: <strong style={{ color: 'var(--text-main)' }}>{item.vinculado.soporte.placa || '-'}</strong> &nbsp;|&nbsp; Serial: <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{item.vinculado.soporte.serial || 'Sin serial'}</strong>
+                                </div>
+                              </div>
+                              <button 
+                                className="btn btn-outline" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}
+                                onClick={() => openModal(item.vinculado.soporte)}
+                                title="Editar Soporte"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : hasSearchedLinked ? (
+            <div className="glass-card" style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <h4 style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-main)', marginBottom: '0.5rem' }}>
+                No se encontraron dispositivos vinculados
+              </h4>
+              <p style={{ fontSize: '0.85rem', maxWidth: '500px', margin: '0 auto' }}>
+                No hubo coincidencias con los criterios de búsqueda actuales. Intenta verificar el serial, seleccionar más tipos de dispositivos o ajustar los filtros de institución/sede.
+              </p>
+            </div>
+          ) : (
+            <div className="glass-card" style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-main)', marginBottom: '0.5rem' }}>
+                Búsqueda de Equipos Vinculados
+              </h4>
+              <p style={{ fontSize: '0.85rem', maxWidth: '600px', margin: '0 auto' }}>
+                Ingresa el serial o placa de una Pantalla o una Tablet para consultar sus equipos vinculados (Servidor y Soporte en pantalla, o Carro Cargador en tablet). También puedes filtrar por institución, sede o aula.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
       {showModal && (
         <div className="modal-overlay">
           <div className="modal glass-card">
@@ -1314,7 +2056,7 @@ const App = () => {
                 <textarea rows="3" value={formData.notes || formData.notas || ''} onChange={e => setFormData({...formData, notas: e.target.value})} />
               </div>
 
-              <div style={{display: 'flex', gap: '1rem', marginTop: '2rem'}}>
+              <div className="modal-actions" style={{display: 'flex', gap: '1rem', marginTop: '2rem'}}>
                 <button type="submit" className="btn btn-primary" style={{flex: 1}}>
                   <Check size={18} /> {editingDevice ? 'Actualizar y Validar' : 'Guardar Dispositivo'}
                 </button>
@@ -1646,7 +2388,7 @@ const App = () => {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+              <div className="modal-actions" style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
                 <button 
                   type="button" 
                   className="btn btn-outline" 
@@ -1811,7 +2553,7 @@ const App = () => {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+            <div className="modal-actions" style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
               <button 
                 type="button" 
                 className="btn btn-outline" 

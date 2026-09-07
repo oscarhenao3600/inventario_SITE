@@ -125,6 +125,14 @@ function requireAdmin(req, res, next) {
   }
 }
 
+function requireAdminOrChief(req, res, next) {
+  if (req.user && (req.user.role === 'admin' || req.user.isChief === true)) {
+    next();
+  } else {
+    res.status(403).json({ error: 'Acceso restringido. Se requieren permisos de administrador o directivo.' });
+  }
+}
+
 // --- Rutas de Autenticación ---
 
 // Registro de usuario
@@ -276,7 +284,7 @@ app.use('/api/tipos', authenticateToken);
 
 // Rutas de escritura protegidas adicionalmente por rol
 app.post('/api/dispositivos', requireAdmin);
-app.put('/api/dispositivos/:id', requireAdmin);
+app.put('/api/dispositivos/:id', requireAdminOrChief);
 app.delete('/api/dispositivos/:id', requireAdmin);
 
 // Buscar dispositivos (por placa o serial)
@@ -1212,6 +1220,317 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
     });
 
     res.json({ comparativo, excelSede: excelSedeName });
+  } catch (err) { next(err); }
+});
+
+// --- Endpoint Búsqueda Vinculada Exclusivo para isChief ---
+app.get('/api/chief/busqueda-vinculada', authenticateToken, async (req, res, next) => {
+  try {
+    // Seguridad: Solo usuarios con el flag isChief pueden acceder
+    if (!req.user || !req.user.isChief) {
+      return res.status(403).json({ error: 'Acceso restringido. Solo disponible para personal directivo (isChief).' });
+    }
+
+    const { q, tipos, institucion, sede, aula, convenio } = req.query;
+    const db = await connectDB();
+    const collection = db.collection('dispositivos');
+
+    let query = {};
+
+    if (q && q.trim()) {
+      const term = q.trim();
+      query.$or = [
+        { serial: { $regex: term, $options: 'i' } },
+        { placa: { $regex: term, $options: 'i' } }
+      ];
+    }
+
+    // Procesar tipos recibidos (array o string separado por comas)
+    let tiposList = [];
+    if (Array.isArray(tipos)) {
+      tiposList = tipos;
+    } else if (typeof tipos === 'string' && tipos.trim()) {
+      tiposList = tipos.split(',').map(t => t.trim()).filter(Boolean);
+    }
+
+    if (tiposList.length > 0) {
+      query.dispositivo = { $in: tiposList };
+    }
+
+    if (institucion && institucion.trim()) {
+      query.institucion = { $regex: new RegExp(`^${institucion.trim()}$`, 'i') };
+    }
+    if (sede && sede.trim()) {
+      query.sede = { $regex: new RegExp(`^${sede.trim()}$`, 'i') };
+    }
+    if (aula && aula.trim()) {
+      query.aula = { $regex: new RegExp(`^${aula.trim()}$`, 'i') };
+    }
+    if (convenio && convenio.trim()) {
+      query.convenio = convenio.trim();
+    }
+
+    // Si no hay ningún criterio, retornar vacío para evitar cargar toda la base de datos sin control
+    const hasAnyCriteria = (q && q.trim()) || tiposList.length > 0 || (institucion && institucion.trim()) || (sede && sede.trim()) || (aula && aula.trim()) || (convenio && convenio.trim());
+    if (!hasAnyCriteria) {
+      return res.json({ total: 0, resultados: [] });
+    }
+
+    const matchedDevices = await collection.find(query).limit(500).toArray();
+
+    if (matchedDevices.length === 0) {
+      return res.json({ total: 0, resultados: [] });
+    }
+
+    // Obtener las aulas únicas para buscar sus equipos complementarios
+    const classroomsMap = new Map();
+    matchedDevices.forEach(d => {
+      const key = `${(d.institucion || '').toUpperCase()}::${(d.sede || '').toUpperCase()}::${(d.aula || '').toUpperCase()}`;
+      if (!classroomsMap.has(key)) {
+        classroomsMap.set(key, {
+          institucion: d.institucion,
+          sede: d.sede,
+          aula: d.aula
+        });
+      }
+    });
+
+    const classroomFilters = Array.from(classroomsMap.values()).map(c => ({
+      institucion: { $regex: new RegExp(`^${(c.institucion || '').trim()}$`, 'i') },
+      sede: { $regex: new RegExp(`^${(c.sede || '').trim()}$`, 'i') },
+      aula: { $regex: new RegExp(`^${(c.aula || '').trim()}$`, 'i') }
+    }));
+
+    let allClassroomDevices = [];
+    if (classroomFilters.length > 0) {
+      allClassroomDevices = await collection.find({ $or: classroomFilters }).toArray();
+    }
+
+    // Agrupar por aula
+    const devicesByAula = new Map();
+    allClassroomDevices.forEach(d => {
+      const key = `${(d.institucion || '').toUpperCase()}::${(d.sede || '').toUpperCase()}::${(d.aula || '').toUpperCase()}`;
+      if (!devicesByAula.has(key)) {
+        devicesByAula.set(key, []);
+      }
+      devicesByAula.get(key).push(d);
+    });
+
+    // Enriquecer cada dispositivo encontrado con sus relaciones
+    const resultados = matchedDevices.map(device => {
+      const key = `${(device.institucion || '').toUpperCase()}::${(device.sede || '').toUpperCase()}::${(device.aula || '').toUpperCase()}`;
+      const aulaDevices = devicesByAula.get(key) || [];
+
+      // Filtrar mesas y sillas para las relaciones del aula
+      const aulaSinMuebles = aulaDevices.filter(d => 
+        d.dispositivo !== 'Mesa Interactiva Tactil' && 
+        d.dispositivo !== 'Silla De Mesa interactiva'
+      );
+
+      const soporte = aulaDevices.find(d => d.dispositivo === 'Soporte Electrónico Pantalla Interactiva Táctil');
+      const servidor = aulaDevices.find(d => d.dispositivo === 'Servidor Portable de Aula SITE Sistema Cloud');
+      const carro = aulaDevices.find(d => d.dispositivo === 'Carro Cargador de Tabletas');
+      const pantalla = aulaDevices.find(d => d.dispositivo === 'Pantalla Interactiva Táctil');
+
+      let tipoRelacion = 'dispositivo';
+      let vinculado = null;
+      let relacionDescripcion = '';
+
+      if (device.dispositivo === 'Pantalla Interactiva Táctil') {
+        tipoRelacion = 'pantalla_kit';
+        relacionDescripcion = 'Pantalla vinculada a Servidor y Soporte en el aula';
+        vinculado = {
+          servidor: servidor || null,
+          soporte: soporte || null
+        };
+      } else if (device.dispositivo === 'Tablet Para Estudiantes' || device.dispositivo === 'Tablet Para Docentes') {
+        if (carro) {
+          tipoRelacion = 'tablet_con_carro';
+          relacionDescripcion = `Tablet ligada a Carro Cargador (${carro.serial || carro.placa || 'Aula'})`;
+          vinculado = {
+            carroCargador: carro || null
+          };
+        } else if (device.dispositivo === 'Tablet Para Docentes') {
+          // Caso Tablet Docente SIN carro -> ligada a pantalla y mostrar equipos del aula excluyendo mesas y sillas
+          tipoRelacion = 'tablet_docente_sin_carro';
+          relacionDescripcion = 'Tablet docente sin carro cargador en aula: vinculada a la Pantalla y equipos del aula';
+          vinculado = {
+            pantalla: pantalla || null,
+            servidor: servidor || null,
+            soporte: soporte || null,
+            equiposAulaSinMuebles: aulaSinMuebles.filter(d => d._id.toString() !== device._id.toString())
+          };
+        } else {
+          tipoRelacion = 'tablet_estudiante_sin_carro';
+          relacionDescripcion = 'Tablet estudiante sin carro cargador registrado en el aula';
+          vinculado = {
+            carroCargador: null
+          };
+        }
+      } else if (device.dispositivo === 'Carro Cargador de Tabletas') {
+        const tabletsCount = aulaDevices.filter(d => d.dispositivo === 'Tablet Para Estudiantes' || d.dispositivo === 'Tablet Para Docentes').length;
+        tipoRelacion = 'carro_cargador';
+        relacionDescripcion = `Carro Cargador con ${tabletsCount} tabletas en el aula`;
+        vinculado = {
+          totalTabletsEnAula: tabletsCount,
+          pantalla: pantalla || null
+        };
+      } else if (device.dispositivo === 'Servidor Portable de Aula SITE Sistema Cloud' || device.dispositivo === 'Soporte Electrónico Pantalla Interactiva Táctil') {
+        tipoRelacion = 'componente_pantalla';
+        relacionDescripcion = 'Componente del kit de Pantalla Interactiva';
+        vinculado = {
+          pantalla: pantalla || null,
+          servidor: servidor || null,
+          soporte: soporte || null
+        };
+      }
+
+      return {
+        ...device,
+        tipoRelacion,
+        relacionDescripcion,
+        vinculado,
+        aulaDetalle: {
+          totalDispositivosSinMuebles: aulaSinMuebles.length,
+          tienePantalla: !!pantalla,
+          tieneServidor: !!servidor,
+          tieneSoporte: !!soporte,
+          tieneCarro: !!carro
+        }
+      };
+    });
+
+    res.json({
+      total: resultados.length,
+      resultados
+    });
+  } catch (err) { next(err); }
+});
+
+// Exportar resultados de Búsqueda Vinculada a Excel (exclusivo isChief)
+app.post('/api/chief/exportar-vinculados', authenticateToken, async (req, res, next) => {
+  try {
+    if (!req.user || !req.user.isChief) {
+      return res.status(403).json({ error: 'Acceso restringido. Solo disponible para personal directivo (isChief).' });
+    }
+
+    const { resultados } = req.body;
+    if (!resultados || !Array.isArray(resultados) || resultados.length === 0) {
+      return res.status(400).json({ error: 'No hay resultados para exportar.' });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Inventario Vinculado');
+
+    worksheet.columns = [
+      { header: 'Institución', key: 'institucion', width: 25 },
+      { header: 'Sede', key: 'sede', width: 20 },
+      { header: 'Aula', key: 'aula', width: 18 },
+      { header: 'Convenio', key: 'convenio', width: 15 },
+      { header: 'Dispositivo Principal', key: 'dispositivo', width: 26 },
+      { header: 'Placa Principal', key: 'placa', width: 14 },
+      { header: 'Serial Principal', key: 'serial', width: 22 },
+      { header: 'Modelo Principal', key: 'modelo', width: 22 },
+      { header: 'Tipo de Vínculo', key: 'tipoRelacion', width: 22 },
+      { header: 'Relación / Observación', key: 'relacionDescripcion', width: 38 },
+      { header: 'Equipo Vinculado 1', key: 'vinculado1_tipo', width: 24 },
+      { header: 'Placa Vinculado 1', key: 'vinculado1_placa', width: 15 },
+      { header: 'Serial Vinculado 1', key: 'vinculado1_serial', width: 20 },
+      { header: 'Equipo Vinculado 2', key: 'vinculado2_tipo', width: 24 },
+      { header: 'Placa Vinculado 2', key: 'vinculado2_placa', width: 15 },
+      { header: 'Serial Vinculado 2', key: 'vinculado2_serial', width: 20 },
+      { header: 'Notas', key: 'notas', width: 25 }
+    ];
+
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF6366F1' }
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    const rows = resultados.map(r => {
+      let v1_tipo = '', v1_placa = '', v1_serial = '';
+      let v2_tipo = '', v2_placa = '', v2_serial = '';
+
+      if (r.tipoRelacion === 'pantalla_kit' && r.vinculado) {
+        if (r.vinculado.servidor) {
+          v1_tipo = 'Servidor Portable SITE';
+          v1_placa = r.vinculado.servidor.placa || '';
+          v1_serial = r.vinculado.servidor.serial || '';
+        }
+        if (r.vinculado.soporte) {
+          v2_tipo = 'Soporte Electrónico';
+          v2_placa = r.vinculado.soporte.placa || '';
+          v2_serial = r.vinculado.soporte.serial || '';
+        }
+      } else if (r.tipoRelacion === 'tablet_con_carro' && r.vinculado?.carroCargador) {
+        v1_tipo = 'Carro Cargador de Tabletas';
+        v1_placa = r.vinculado.carroCargador.placa || '';
+        v1_serial = r.vinculado.carroCargador.serial || '';
+      } else if (r.tipoRelacion === 'tablet_docente_sin_carro' && r.vinculado) {
+        if (r.vinculado.pantalla) {
+          v1_tipo = 'Pantalla Interactiva (Aula)';
+          v1_placa = r.vinculado.pantalla.placa || '';
+          v1_serial = r.vinculado.pantalla.serial || '';
+        }
+        if (r.vinculado.servidor) {
+          v2_tipo = 'Servidor (Aula)';
+          v2_placa = r.vinculado.servidor.placa || '';
+          v2_serial = r.vinculado.servidor.serial || '';
+        }
+      } else if (r.tipoRelacion === 'componente_pantalla' && r.vinculado) {
+        if (r.vinculado.pantalla) {
+          v1_tipo = 'Pantalla Interactiva (Aula)';
+          v1_placa = r.vinculado.pantalla.placa || '';
+          v1_serial = r.vinculado.pantalla.serial || '';
+        }
+      }
+
+      return {
+        institucion: r.institucion || '',
+        sede: r.sede || '',
+        aula: r.aula || '',
+        convenio: r.convenio || '',
+        dispositivo: r.dispositivo || '',
+        placa: r.placa || '',
+        serial: r.serial || '',
+        modelo: r.modelo || '',
+        tipoRelacion: r.tipoRelacion || '',
+        relacionDescripcion: r.relacionDescripcion || '',
+        vinculado1_tipo: v1_tipo,
+        vinculado1_placa: v1_placa,
+        vinculado1_serial: v1_serial,
+        vinculado2_tipo: v2_tipo,
+        vinculado2_placa: v2_placa,
+        vinculado2_serial: v2_serial,
+        notas: r.notas || ''
+      };
+    });
+
+    worksheet.addRows(rows);
+    worksheet.autoFilter = 'A1:Q1';
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+          };
+        });
+      }
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=inventario_vinculado.xlsx');
+
+    await workbook.xlsx.write(res);
+    res.end();
   } catch (err) { next(err); }
 });
 
