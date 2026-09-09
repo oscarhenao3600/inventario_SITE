@@ -375,7 +375,7 @@ app.get('/api/dispositivos', async (req, res, next) => {
 // Buscar Duplicados (Agrupación por placa o serial)
 app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
   try {
-    const { campo, sede, tipo, aula } = req.query; // campo: 'placa' o 'serial'
+    const { campo, sede, tipo, aula, convenio } = req.query; // campo: 'placa' o 'serial'
     
     if (!['placa', 'serial'].includes(campo)) {
       return res.status(400).json({ error: 'Campo de duplicados inválido' });
@@ -416,7 +416,9 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
                   ]
                 }]
               : []
-            )
+            ),
+            // Filtro opcional por convenio
+            ...(convenio && convenio.trim() ? [{ convenio: convenio.trim() }] : [])
           ]
         }
       },
@@ -425,7 +427,7 @@ app.get('/api/duplicados', authenticateToken, async (req, res, next) => {
       // 3. Normalizar el campo para la agrupación (manejar null/empty)
       {
         $project: {
-          dispositivo: 1, aula: 1, placa: 1, serial: 1, institucion: 1, sede: 1, modelo: 1, notas: 1,
+          dispositivo: 1, aula: 1, placa: 1, serial: 1, institucion: 1, sede: 1, modelo: 1, convenio: 1, notas: 1,
           normCampo: { $ifNull: [ { $cond: [ { $eq: [`$${campo}`, ""] }, null, `$${campo}` ] }, "SIN DATO" ] }
         }
       },
@@ -1282,28 +1284,19 @@ app.get('/api/chief/busqueda-vinculada', authenticateToken, async (req, res, nex
       return res.json({ total: 0, resultados: [] });
     }
 
-    // Obtener las aulas únicas para buscar sus equipos complementarios
-    const classroomsMap = new Map();
-    matchedDevices.forEach(d => {
-      const key = `${(d.institucion || '').toUpperCase()}::${(d.sede || '').toUpperCase()}::${(d.aula || '').toUpperCase()}`;
-      if (!classroomsMap.has(key)) {
-        classroomsMap.set(key, {
-          institucion: d.institucion,
-          sede: d.sede,
-          aula: d.aula
-        });
-      }
-    });
-
-    const classroomFilters = Array.from(classroomsMap.values()).map(c => ({
-      institucion: { $regex: new RegExp(`^${(c.institucion || '').trim()}$`, 'i') },
-      sede: { $regex: new RegExp(`^${(c.sede || '').trim()}$`, 'i') },
-      aula: { $regex: new RegExp(`^${(c.aula || '').trim()}$`, 'i') }
-    }));
+    // Obtener las instituciones, sedes y aulas únicas para buscar sus equipos complementarios eficientemente
+    const instSet = [...new Set(matchedDevices.map(d => d.institucion).filter(Boolean))];
+    const sedeSet = [...new Set(matchedDevices.map(d => d.sede).filter(Boolean))];
+    const aulaSet = [...new Set(matchedDevices.map(d => d.aula).filter(Boolean))];
 
     let allClassroomDevices = [];
-    if (classroomFilters.length > 0) {
-      allClassroomDevices = await collection.find({ $or: classroomFilters }).toArray();
+    if (instSet.length > 0 && aulaSet.length > 0) {
+      allClassroomDevices = await collection.find({
+        institucion: { $in: instSet },
+        sede: { $in: sedeSet },
+        aula: { $in: aulaSet },
+        dispositivo: { $nin: ['Mesa Interactiva Tactil', 'Silla De Mesa interactiva'] }
+      }).toArray();
     }
 
     // Agrupar por aula
@@ -1338,7 +1331,15 @@ app.get('/api/chief/busqueda-vinculada', authenticateToken, async (req, res, nex
 
       if (device.dispositivo === 'Pantalla Interactiva Táctil') {
         tipoRelacion = 'pantalla_kit';
-        relacionDescripcion = 'Pantalla vinculada a Servidor y Soporte en el aula';
+        if (servidor && soporte) {
+          relacionDescripcion = 'Pantalla vinculada a Servidor y Soporte en el aula';
+        } else if (!servidor && !soporte) {
+          relacionDescripcion = 'Pantalla en aula sin Servidor ni Soporte registrados';
+        } else if (!servidor) {
+          relacionDescripcion = 'Pantalla en aula sin Servidor registrado';
+        } else {
+          relacionDescripcion = 'Pantalla en aula sin Soporte registrado';
+        }
         vinculado = {
           servidor: servidor || null,
           soporte: soporte || null
@@ -1377,7 +1378,27 @@ app.get('/api/chief/busqueda-vinculada', authenticateToken, async (req, res, nex
         };
       } else if (device.dispositivo === 'Servidor Portable de Aula SITE Sistema Cloud' || device.dispositivo === 'Soporte Electrónico Pantalla Interactiva Táctil') {
         tipoRelacion = 'componente_pantalla';
-        relacionDescripcion = 'Componente del kit de Pantalla Interactiva';
+        if (device.dispositivo === 'Servidor Portable de Aula SITE Sistema Cloud') {
+          if (pantalla && soporte) {
+            relacionDescripcion = 'Servidor vinculado a Pantalla y Soporte en el aula';
+          } else if (!pantalla && !soporte) {
+            relacionDescripcion = 'Servidor sin Pantalla ni Soporte registrados en el aula';
+          } else if (!pantalla) {
+            relacionDescripcion = 'Servidor sin Pantalla Interactiva registrada en el aula';
+          } else {
+            relacionDescripcion = 'Servidor con Pantalla pero sin Soporte registrado en el aula';
+          }
+        } else {
+          if (pantalla && servidor) {
+            relacionDescripcion = 'Soporte vinculado a Pantalla y Servidor en el aula';
+          } else if (!pantalla && !servidor) {
+            relacionDescripcion = 'Soporte sin Pantalla ni Servidor registrados en el aula';
+          } else if (!pantalla) {
+            relacionDescripcion = 'Soporte sin Pantalla Interactiva registrada en el aula';
+          } else {
+            relacionDescripcion = 'Soporte con Pantalla pero sin Servidor registrado en el aula';
+          }
+        }
         vinculado = {
           pantalla: pantalla || null,
           servidor: servidor || null,
@@ -1460,11 +1481,15 @@ app.post('/api/chief/exportar-vinculados', authenticateToken, async (req, res, n
           v1_tipo = 'Servidor Portable SITE';
           v1_placa = r.vinculado.servidor.placa || '';
           v1_serial = r.vinculado.servidor.serial || '';
+        } else {
+          v1_tipo = 'Servidor Portable (NO REGISTRADO)';
         }
         if (r.vinculado.soporte) {
           v2_tipo = 'Soporte Electrónico';
           v2_placa = r.vinculado.soporte.placa || '';
           v2_serial = r.vinculado.soporte.serial || '';
+        } else {
+          v2_tipo = 'Soporte Electrónico (NO REGISTRADO)';
         }
       } else if (r.tipoRelacion === 'tablet_con_carro' && r.vinculado?.carroCargador) {
         v1_tipo = 'Carro Cargador de Tabletas';
@@ -1475,6 +1500,8 @@ app.post('/api/chief/exportar-vinculados', authenticateToken, async (req, res, n
           v1_tipo = 'Pantalla Interactiva (Aula)';
           v1_placa = r.vinculado.pantalla.placa || '';
           v1_serial = r.vinculado.pantalla.serial || '';
+        } else {
+          v1_tipo = 'Pantalla Interactiva (NO REGISTRADA)';
         }
         if (r.vinculado.servidor) {
           v2_tipo = 'Servidor (Aula)';
@@ -1486,6 +1513,25 @@ app.post('/api/chief/exportar-vinculados', authenticateToken, async (req, res, n
           v1_tipo = 'Pantalla Interactiva (Aula)';
           v1_placa = r.vinculado.pantalla.placa || '';
           v1_serial = r.vinculado.pantalla.serial || '';
+        } else {
+          v1_tipo = 'Pantalla Interactiva (NO REGISTRADA)';
+        }
+        if (r.dispositivo === 'Soporte Electrónico Pantalla Interactiva Táctil') {
+          if (r.vinculado.servidor) {
+            v2_tipo = 'Servidor Portable SITE';
+            v2_placa = r.vinculado.servidor.placa || '';
+            v2_serial = r.vinculado.servidor.serial || '';
+          } else {
+            v2_tipo = 'Servidor Portable (NO REGISTRADO)';
+          }
+        } else if (r.dispositivo === 'Servidor Portable de Aula SITE Sistema Cloud') {
+          if (r.vinculado.soporte) {
+            v2_tipo = 'Soporte Electrónico';
+            v2_placa = r.vinculado.soporte.placa || '';
+            v2_serial = r.vinculado.soporte.serial || '';
+          } else {
+            v2_tipo = 'Soporte Electrónico (NO REGISTRADO)';
+          }
         }
       }
 
