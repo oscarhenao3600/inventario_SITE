@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "reporte:tablets": "node generar_reporte_tablets.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

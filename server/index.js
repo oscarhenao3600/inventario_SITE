@@ -4,6 +4,7 @@ const cors = require('cors');
 const ExcelJS = require('exceljs');
 const multer = require('multer');
 const fs = require('fs');
+const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
@@ -20,11 +21,62 @@ const noSerialTypes = [
 // Puedes cambiar el JWT_SECRET en el archivo .env o aquí directamente
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
-const uploadDir = 'uploads/';
+// Determinación robusta de la raíz del proyecto (donde reside .env y uploads/)
+// Compatible tanto en desarrollo local (Windows/Linux) como en contenedor Docker
+const isDocker = fs.existsSync('/.dockerenv') || process.env.IS_DOCKER === 'true';
+
+const PROJECT_ROOT = process.env.PROJECT_ROOT
+  ? path.resolve(process.env.PROJECT_ROOT)
+  : (isDocker
+      ? __dirname
+      : (fs.existsSync(path.resolve(__dirname, '..', '.env'))
+          ? path.resolve(__dirname, '..')
+          : (fs.existsSync(path.resolve(__dirname, '.env')) ? __dirname : path.resolve(__dirname, '..'))));
+
+const uploadDir = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : path.join(PROJECT_ROOT, 'uploads');
+
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
+
+const docsBaseDir = path.join(uploadDir, 'documentos');
+if (!fs.existsSync(docsBaseDir)) {
+  fs.mkdirSync(docsBaseDir, { recursive: true });
+}
+
 const upload = multer({ dest: uploadDir });
+
+function sanitizeFolderName(name) {
+  if (!name) return 'GENERAL';
+  return name
+    .toString()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_\-\.]/g, '_')
+    .replace(/_+/g, '_')
+    .toUpperCase();
+}
+
+const uploadTempDir = path.join(uploadDir, 'temp');
+if (!fs.existsSync(uploadTempDir)) {
+  fs.mkdirSync(uploadTempDir, { recursive: true });
+}
+
+const uploadDocumento = multer({
+  dest: uploadTempDir,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+  fileFilter: (req, file, cb) => {
+    const isPdf = file.mimetype === 'application/pdf' || (file.originalname && file.originalname.toLowerCase().endsWith('.pdf'));
+    if (isPdf) {
+      cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten archivos en formato PDF (.pdf)'));
+    }
+  }
+});
 
 const app = express();
 
@@ -70,6 +122,10 @@ async function connectDB() {
       console.log(`Migrated ${migrationResult.modifiedCount} devices to have 'convenio' field.`);
     }
 
+    // Asegurar índice para la colección de actas y documentos
+    const docsColl = db.collection('documentos_sedes');
+    await docsColl.createIndex({ institucion: 1, sede: 1, tipo: 1, fechaDocumento: -1 });
+
     return db;
   } catch (err) {
     console.error('MongoDB connection error:', err);
@@ -106,7 +162,7 @@ connectDB();
 // Middleware para proteger rutas
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
 
   if (!token) return res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
 
@@ -281,6 +337,7 @@ app.use('/api/importar', authenticateToken, requireAdmin);
 app.use('/api/exportar-total', authenticateToken, requireAdmin);
 app.use('/api/stats', authenticateToken);
 app.use('/api/tipos', authenticateToken);
+app.use('/api/documentos', authenticateToken);
 
 // Rutas de escritura protegidas adicionalmente por rol
 app.post('/api/dispositivos', requireAdmin);
@@ -931,6 +988,223 @@ app.get('/api/stats', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// --- Endpoints de Gestión de Documentos (Actas de Entrega y Visitas de Seguimiento) ---
+
+// Consultar actas y documentos por institución y sede
+app.get('/api/documentos', async (req, res, next) => {
+  try {
+    const { institucion, sede, tipo } = req.query;
+    const db = await connectDB();
+    const collection = db.collection('documentos_sedes');
+
+    let query = {};
+    if (institucion && institucion.trim()) {
+      query.institucion = { $regex: new RegExp(`^${institucion.trim()}$`, 'i') };
+    }
+    if (sede && sede.trim()) {
+      query.sede = { $regex: new RegExp(`^${sede.trim()}$`, 'i') };
+    }
+    if (tipo && tipo.trim()) {
+      query.tipo = tipo.trim();
+    }
+
+    const docs = await collection.find(query).sort({ fechaDocumento: -1, createdAt: -1 }).toArray();
+    res.json(docs);
+  } catch (err) { next(err); }
+});
+
+// Subir acta (Entrega de inventario o Visita de seguimiento) - Solo Admin o Directivo (Chief)
+app.post('/api/documentos', requireAdminOrChief, (req, res, next) => {
+  uploadDocumento.single('archivo')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'El archivo excede el tamaño máximo permitido de 25 MB' });
+      }
+      return res.status(400).json({ error: err.message || 'Error al procesar el archivo PDF' });
+    }
+
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'Debe adjuntar un archivo en formato PDF (.pdf)' });
+      }
+
+      const { institucion, sede, tipo, fechaDocumento, responsable, observaciones } = req.body;
+
+      if (!institucion || !institucion.trim()) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'La institución educativa es obligatoria' });
+      }
+
+      if (!sede || !sede.trim()) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'La sede es obligatoria' });
+      }
+
+      const tipoNormalizado = tipo === 'visita' ? 'visita' : 'entrega';
+
+      if (!fechaDocumento || !fechaDocumento.trim()) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'La fecha del documento es obligatoria' });
+      }
+
+      const institucionNorm = institucion.trim().toUpperCase();
+      const sedeNorm = sede.trim().toUpperCase();
+
+      // Directorio físico específico por Institución y por Sede
+      const instFolder = sanitizeFolderName(institucionNorm);
+      const sedeFolder = sanitizeFolderName(sedeNorm);
+      const targetDir = path.join(docsBaseDir, instFolder, sedeFolder);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      // Nombre del archivo limpio con tipo, fecha y nombre original
+      const cleanOriginal = req.file.originalname
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+      const finalFileName = `${tipoNormalizado}_${Date.now()}_${cleanOriginal}`;
+      const finalFilePath = path.join(targetDir, finalFileName);
+
+      // Mover de temp al directorio destino
+      fs.copyFileSync(req.file.path, finalFilePath);
+      try { fs.unlinkSync(req.file.path); } catch(e) {}
+
+      // Ruta relativa normalizada con '/' independiente de Windows/Linux
+      const relPath = path.relative(PROJECT_ROOT, finalFilePath).replace(/\\/g, '/');
+
+      const db = await connectDB();
+      const collection = db.collection('documentos_sedes');
+
+      const nuevoDoc = {
+        institucion: institucionNorm,
+        sede: sedeNorm,
+        tipo: tipoNormalizado,
+        fechaDocumento: fechaDocumento.trim(),
+        fechaSubida: new Date(),
+        nombreOriginal: req.file.originalname,
+        nombreArchivo: finalFileName,
+        rutaArchivo: relPath,
+        tamano: req.file.size,
+        mimetype: req.file.mimetype || 'application/pdf',
+        responsable: (responsable || '').trim(),
+        observaciones: (observaciones || '').trim(),
+        subidoPor: req.user ? req.user.username : 'admin',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const result = await collection.insertOne(nuevoDoc);
+      nuevoDoc._id = result.insertedId;
+
+      res.status(201).json({
+        success: true,
+        message: tipoNormalizado === 'entrega' 
+          ? 'Acta de entrega registrada exitosamente' 
+          : 'Acta de visita de seguimiento registrada exitosamente',
+        documento: nuevoDoc
+      });
+    } catch (dbErr) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
+      next(dbErr);
+    }
+  });
+});
+
+// Ver o descargar archivo PDF del documento
+app.get('/api/documentos/:id/archivo', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { descargar } = req.query;
+
+    const db = await connectDB();
+    const collection = db.collection('documentos_sedes');
+    const doc = await collection.findOne({ _id: new ObjectId(id) });
+
+    if (!doc) {
+      return res.status(404).json({ error: 'Documento no encontrado' });
+    }
+
+    // Resolución del archivo con comprobaciones de respaldo (Docker / Host / Rutas antiguas)
+    let absolutePath = path.resolve(PROJECT_ROOT, doc.rutaArchivo);
+
+    if (!fs.existsSync(absolutePath)) {
+      const relClean = (doc.rutaArchivo || '').replace(/^uploads\/?/, '');
+      const candidate1 = path.join(uploadDir, relClean);
+      if (fs.existsSync(candidate1)) {
+        absolutePath = candidate1;
+      } else {
+        const fileName = doc.nombreArchivo || path.basename(doc.rutaArchivo);
+        const candidate2 = path.join(docsBaseDir, sanitizeFolderName(doc.institucion), sanitizeFolderName(doc.sede), fileName);
+        if (fs.existsSync(candidate2)) {
+          absolutePath = candidate2;
+        } else {
+          const candidate3 = path.join(docsBaseDir, 'GENERAL', 'GENERAL', fileName);
+          if (fs.existsSync(candidate3)) {
+            absolutePath = candidate3;
+          }
+        }
+      }
+    }
+
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: 'El archivo físico no se encuentra en el servidor' });
+    }
+
+    res.setHeader('Content-Type', doc.mimetype || 'application/pdf');
+
+    // Restricción: Los usuarios con rol lector solo pueden visualizar (inline); descarga directa reservada a admin y chief
+    const canDownload = req.user && (req.user.role === 'admin' || req.user.isChief === true);
+    const disposition = (descargar === '1' && canDownload) ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(doc.nombreOriginal)}"`);
+    res.sendFile(absolutePath);
+  } catch (err) { next(err); }
+});
+
+// Eliminar acta o documento - Solo Admin o Directivo (Chief)
+app.delete('/api/documentos/:id', requireAdminOrChief, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const db = await connectDB();
+    const collection = db.collection('documentos_sedes');
+
+    const doc = await collection.findOne({ _id: new ObjectId(id) });
+    if (!doc) {
+      return res.status(404).json({ error: 'Documento no encontrado' });
+    }
+
+    if (doc.rutaArchivo) {
+      let absolutePath = path.resolve(PROJECT_ROOT, doc.rutaArchivo);
+      if (!fs.existsSync(absolutePath)) {
+        const relClean = (doc.rutaArchivo || '').replace(/^uploads\/?/, '');
+        const candidate1 = path.join(uploadDir, relClean);
+        if (fs.existsSync(candidate1)) {
+          absolutePath = candidate1;
+        } else {
+          const fileName = doc.nombreArchivo || path.basename(doc.rutaArchivo);
+          const candidate2 = path.join(docsBaseDir, sanitizeFolderName(doc.institucion), sanitizeFolderName(doc.sede), fileName);
+          if (fs.existsSync(candidate2)) {
+            absolutePath = candidate2;
+          }
+        }
+      }
+
+      if (fs.existsSync(absolutePath)) {
+        try {
+          fs.unlinkSync(absolutePath);
+        } catch (fileErr) {
+          console.error(`Error borrando archivo ${absolutePath}:`, fileErr);
+        }
+      }
+    }
+
+    await collection.deleteOne({ _id: new ObjectId(id) });
+    res.json({ success: true, message: 'Documento eliminado exitosamente' });
+  } catch (err) { next(err); }
+});
+
 // --- Endpoints del Generador de Placas (Solo Admin) ---
 
 app.get('/api/placas/next-available', authenticateToken, requireAdmin, async (req, res, next) => {
@@ -1223,6 +1497,26 @@ app.get('/api/comparativo', authenticateToken, async (req, res, next) => {
 
     res.json({ comparativo, excelSede: excelSedeName });
   } catch (err) { next(err); }
+});
+
+// --- Endpoint para Descargar Reporte Excel de Tablets Faltantes (Docentes y Estudiantes) ---
+app.get('/api/reportes/tablets-faltantes', authenticateToken, async (req, res, next) => {
+  try {
+    const { generarReporte } = require('./generar_reporte_tablets');
+    const tempFilePath = path.join(uploadDir, `reporte_tablets_faltantes_${Date.now()}.xlsx`);
+    const result = await generarReporte(tempFilePath);
+    
+    res.download(result.outputPath, 'Reporte_Tablets_Faltantes_SITE.xlsx', (err) => {
+      if (fs.existsSync(tempFilePath)) {
+        try { fs.unlinkSync(tempFilePath); } catch (e) {}
+      }
+      if (err && !res.headersSent) {
+        next(err);
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // --- Endpoint Búsqueda Vinculada Exclusivo para isChief ---

@@ -15,6 +15,7 @@ const App = () => {
   const [user, setUser] = useState(localStorage.getItem('user'));
   const [role, setRole] = useState(localStorage.getItem('role'));
   const [isChief, setIsChief] = useState(localStorage.getItem('isChief') === 'true');
+  const canManageDocs = role === 'admin' || isChief;
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
   const [authForm, setAuthForm] = useState({ username: '', password: '' });
   const [authError, setAuthError] = useState('');
@@ -119,6 +120,24 @@ const App = () => {
   const LINKED_ITEMS_PER_PAGE = 50;
   const [aulasLinked, setAulasLinked] = useState([]);
 
+  // Estados para Documentación y Actas de Sede (Entrega y Visitas)
+  const [documentosSede, setDocumentosSede] = useState([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [showDocModal, setShowDocModal] = useState(false);
+  const [docModalType, setDocModalType] = useState('entrega'); // 'entrega' o 'visita'
+  const [docForm, setDocForm] = useState({
+    institucion: '',
+    sede: '',
+    tipo: 'entrega',
+    fechaDocumento: new Date().toISOString().split('T')[0],
+    responsable: '',
+    observaciones: '',
+    archivo: null
+  });
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docError, setDocError] = useState('');
+  const [docSuccess, setDocSuccess] = useState('');
+
   // Configurar Interceptor de Axios para incluir el Token
   useEffect(() => {
     const interceptor = axios.interceptors.request.use(
@@ -192,6 +211,135 @@ const App = () => {
     }
   }, [filtroSedeLinked, token, isChief]);
 
+  const fetchDocumentos = async (inst, sede) => {
+    const targetInst = inst !== undefined ? inst : (filtroInstitucion || dispositivos[0]?.institucion || '');
+    const targetSede = sede !== undefined ? sede : (filtroSedeSearch || dispositivos[0]?.sede || '');
+
+    if (!targetInst && !targetSede) {
+      setDocumentosSede([]);
+      return;
+    }
+
+    setLoadingDocs(true);
+    try {
+      const params = new URLSearchParams();
+      if (targetInst) params.append('institucion', targetInst);
+      if (targetSede) params.append('sede', targetSede);
+      const res = await axios.get(`/api/documentos?${params.toString()}`);
+      setDocumentosSede(res.data || []);
+    } catch (err) {
+      console.error("Error fetching documentos", err);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token && (filtroInstitucion || filtroSedeSearch)) {
+      const targetInst = filtroInstitucion || dispositivos[0]?.institucion || '';
+      const targetSede = filtroSedeSearch || dispositivos[0]?.sede || '';
+      if (targetInst || targetSede) {
+        fetchDocumentos(targetInst, targetSede);
+      }
+    } else if (!filtroInstitucion && !filtroSedeSearch) {
+      setDocumentosSede([]);
+    }
+  }, [filtroInstitucion, filtroSedeSearch, token]);
+
+  const openDocModal = (type = 'entrega') => {
+    if (!canManageDocs) {
+      alert('Acceso restringido. Solo administradores o personal directivo pueden gestionar documentos.');
+      return;
+    }
+    const defaultInst = filtroInstitucion || dispositivos[0]?.institucion || '';
+    const defaultSede = filtroSedeSearch || dispositivos[0]?.sede || '';
+    setDocModalType(type);
+    setDocForm({
+      institucion: defaultInst,
+      sede: defaultSede,
+      tipo: type,
+      fechaDocumento: new Date().toISOString().split('T')[0],
+      responsable: '',
+      observaciones: '',
+      archivo: null
+    });
+    setDocError('');
+    setDocSuccess('');
+    setShowDocModal(true);
+  };
+
+  const handleUploadDocumento = async (e) => {
+    e.preventDefault();
+    if (!canManageDocs) {
+      setDocError('Acceso restringido. Solo administradores o personal directivo pueden subir documentos.');
+      return;
+    }
+    if (!docForm.archivo) {
+      setDocError('Por favor selecciona un archivo en formato PDF (.pdf)');
+      return;
+    }
+    if (!docForm.institucion || !docForm.institucion.trim()) {
+      setDocError('La institución educativa es obligatoria');
+      return;
+    }
+    if (!docForm.sede || !docForm.sede.trim()) {
+      setDocError('La sede es obligatoria');
+      return;
+    }
+    if (!docForm.fechaDocumento) {
+      setDocError('La fecha del documento es obligatoria');
+      return;
+    }
+
+    setUploadingDoc(true);
+    setDocError('');
+    setDocSuccess('');
+
+    const fd = new FormData();
+    fd.append('institucion', docForm.institucion);
+    fd.append('sede', docForm.sede);
+    fd.append('tipo', docForm.tipo);
+    fd.append('fechaDocumento', docForm.fechaDocumento);
+    fd.append('responsable', docForm.responsable || '');
+    fd.append('observaciones', docForm.observaciones || '');
+    fd.append('archivo', docForm.archivo);
+
+    try {
+      const queryParams = `institucion=${encodeURIComponent(docForm.institucion)}&sede=${encodeURIComponent(docForm.sede)}&tipo=${encodeURIComponent(docForm.tipo)}`;
+      const res = await axios.post(`/api/documentos?${queryParams}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setDocSuccess(res.data.message || 'Documento guardado exitosamente');
+      await fetchDocumentos(docForm.institucion, docForm.sede);
+      setTimeout(() => {
+        setShowDocModal(false);
+        setDocSuccess('');
+      }, 1000);
+    } catch (err) {
+      console.error('Error subiendo documento:', err);
+      setDocError(err.response?.data?.error || 'Error al subir el archivo PDF');
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const handleDeleteDoc = async (id) => {
+    if (!canManageDocs) {
+      alert('Acceso restringido. Solo administradores o personal directivo pueden eliminar documentos.');
+      return;
+    }
+    if (!window.confirm('¿Estás seguro de que deseas eliminar este documento? Esta acción eliminará el archivo del servidor de forma permanente.')) {
+      return;
+    }
+    try {
+      await axios.delete(`/api/documentos/${id}`);
+      await fetchDocumentos();
+    } catch (err) {
+      console.error('Error eliminando documento:', err);
+      alert(err.response?.data?.error || 'Error al eliminar el documento');
+    }
+  };
+
   const fetchTipos = async () => {
     try {
       const res = await axios.get('/api/tipos');
@@ -235,6 +383,14 @@ const App = () => {
       const res = await axios.get(`/api/dispositivos?${params.toString()}`);
       setDispositivos(res.data);
       setCurrentPage(1);
+
+      const targetInst = filtroInstitucion || res.data[0]?.institucion || '';
+      const targetSede = filtroSedeSearch || res.data[0]?.sede || '';
+      if (targetInst || targetSede) {
+        fetchDocumentos(targetInst, targetSede);
+      } else {
+        setDocumentosSede([]);
+      }
     } catch (err) {
       console.error("Error searching", err);
     } finally {
@@ -1004,6 +1160,222 @@ const App = () => {
                     <span style={{fontWeight: '800', color: 'var(--primary)', fontSize: '1.1rem', background: 'rgba(99, 102, 241, 0.1)', padding: '0.25rem 0.6rem', borderRadius: '0.5rem'}}>{count}</span>
                   </div>
                 ))}
+              </div>
+
+              {/* --- Sección de Documentación y Fechas de Entrega / Visitas --- */}
+              <div style={{marginTop: '1.75rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)'}}>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem'}}>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem'}}>
+                    <span style={{fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)'}}>
+                      Documentación y Actas {filtroSedeSearch ? `de Sede: ${filtroSedeSearch}` : (filtroInstitucion ? `de Institución: ${filtroInstitucion}` : '')}
+                    </span>
+                    {loadingDocs && <span className="spinner spinner-sm" style={{marginLeft: '0.5rem'}}></span>}
+                  </div>
+                </div>
+
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem'}}>
+                  {/* Tarjeta: Acta de Entrega de Inventario */}
+                  <div style={{background: 'var(--bg-card)', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between'}}>
+                    <div>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem'}}>
+                        <div>
+                          <div style={{fontWeight: '700', fontSize: '0.9rem'}}>Acta de Entrega de Inventario</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Documento oficial de dotación inicial</div>
+                        </div>
+                        {documentosSede.some(d => d.tipo === 'entrega') ? (
+                          <span style={{fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--success)', padding: '0.2rem 0.6rem', borderRadius: '1rem', fontWeight: '600'}}>
+                            Registrada
+                          </span>
+                        ) : (
+                          <span style={{fontSize: '0.75rem', background: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', padding: '0.2rem 0.6rem', borderRadius: '1rem', fontWeight: '600'}}>
+                            Sin Acta
+                          </span>
+                        )}
+                      </div>
+
+                      {documentosSede.filter(d => d.tipo === 'entrega').length > 0 ? (
+                        documentosSede.filter(d => d.tipo === 'entrega').map(doc => (
+                          <div key={doc._id} style={{fontSize: '0.85rem', marginBottom: '0.5rem', background: 'var(--bg-input)', padding: '0.85rem', borderRadius: '0.5rem', border: '1px solid var(--border)'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem'}}>
+                              <span style={{color: 'var(--text-muted)'}}>Fecha de Entrega:</span>
+                              <strong style={{color: 'var(--text-main)', fontSize: '0.95rem'}}>{doc.fechaDocumento}</strong>
+                            </div>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.3rem'}}>
+                              <span style={{color: 'var(--text-muted)', fontSize: '0.75rem'}}>
+                                Registrado el {new Date(doc.fechaSubida || doc.createdAt).toLocaleDateString()} {doc.subidoPor ? `por ${doc.subidoPor}` : ''}
+                              </span>
+                            </div>
+                            {doc.responsable && (
+                              <div style={{fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem'}}>
+                                <strong>Responsable:</strong> {doc.responsable}
+                              </div>
+                            )}
+                            {doc.observaciones && (
+                              <div style={{fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '0.5rem', background: 'rgba(0,0,0,0.03)', padding: '0.4rem 0.6rem', borderRadius: '0.4rem'}}>
+                                {doc.observaciones}
+                              </div>
+                            )}
+                            <div style={{display: 'flex', gap: '0.5rem', marginTop: '0.6rem', alignItems: 'center', flexWrap: 'wrap'}}>
+                              <a
+                                href={`/api/documentos/${doc._id}/archivo?token=${encodeURIComponent(token)}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn btn-outline"
+                                style={{fontSize: '0.75rem', padding: '0.35rem 0.7rem', display: 'inline-flex', alignItems: 'center', textDecoration: 'none'}}
+                              >
+                                Ver PDF
+                              </a>
+                              {canManageDocs && (
+                                <>
+                                  <a
+                                    href={`/api/documentos/${doc._id}/archivo?token=${encodeURIComponent(token)}&descargar=1`}
+                                    className="btn btn-outline"
+                                    style={{fontSize: '0.75rem', padding: '0.35rem 0.7rem', display: 'inline-flex', alignItems: 'center', textDecoration: 'none'}}
+                                  >
+                                    Descargar
+                                  </a>
+                                  <button
+                                    className="btn btn-outline"
+                                    style={{fontSize: '0.75rem', padding: '0.35rem 0.7rem', display: 'inline-flex', alignItems: 'center'}}
+                                    onClick={() => openDocModal('entrega')}
+                                    title="Subir nueva versión del acta de entrega"
+                                  >
+                                    Cambiar Acta
+                                  </button>
+                                  <button
+                                    className="btn"
+                                    style={{fontSize: '0.75rem', padding: '0.35rem 0.6rem', background: 'transparent', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)'}}
+                                    onClick={() => handleDeleteDoc(doc._id)}
+                                    title="Eliminar documento"
+                                  >
+                                    Eliminar
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{padding: '0.75rem 0', color: 'var(--text-muted)', fontSize: '0.85rem'}}>
+                          <p style={{marginBottom: canManageDocs ? '0.75rem' : '0'}}>No se ha cargado el acta de entrega de inventario para esta sede.</p>
+                          {canManageDocs && (
+                            <button
+                              className="btn btn-outline"
+                              style={{fontSize: '0.8rem', padding: '0.45rem 0.85rem', display: 'inline-flex', alignItems: 'center', borderColor: 'var(--primary)', color: 'var(--primary)', fontWeight: '600'}}
+                              onClick={() => openDocModal('entrega')}
+                            >
+                              Subir Acta de Entrega (PDF)
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tarjeta: Visitas de Seguimiento */}
+                  <div style={{background: 'var(--bg-card)', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between'}}>
+                    <div>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem'}}>
+                        <div>
+                          <div style={{fontWeight: '700', fontSize: '0.9rem'}}>Visitas de Seguimiento</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>
+                            {documentosSede.filter(d => d.tipo === 'visita').length} {documentosSede.filter(d => d.tipo === 'visita').length === 1 ? 'visita registrada' : 'visitas registradas'}
+                          </div>
+                        </div>
+                        <span style={{fontSize: '0.75rem', background: 'rgba(99, 102, 241, 0.15)', color: 'var(--primary)', padding: '0.2rem 0.6rem', borderRadius: '1rem', fontWeight: '700'}}>
+                          {documentosSede.filter(d => d.tipo === 'visita').length}
+                        </span>
+                      </div>
+
+                      {documentosSede.filter(d => d.tipo === 'visita').length > 0 ? (
+                        <>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '250px', overflowY: 'auto', paddingRight: '0.25rem'}}>
+                            {documentosSede.filter(d => d.tipo === 'visita').map(visita => (
+                              <div key={visita._id} style={{background: 'var(--bg-input)', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)'}}>
+                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem'}}>
+                                  <div>
+                                    <strong style={{fontSize: '0.85rem', color: 'var(--text-main)'}}>
+                                      Fecha de Visita: {visita.fechaDocumento}
+                                    </strong>
+                                  </div>
+                                  <div style={{display: 'flex', gap: '0.3rem'}}>
+                                    <a
+                                      href={`/api/documentos/${visita._id}/archivo?token=${encodeURIComponent(token)}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="btn btn-outline"
+                                      style={{fontSize: '0.7rem', padding: '0.25rem 0.55rem', display: 'inline-flex', alignItems: 'center', textDecoration: 'none'}}
+                                      title="Ver acta en nueva pestaña"
+                                    >
+                                      Ver
+                                    </a>
+                                    {canManageDocs && (
+                                      <>
+                                        <a
+                                          href={`/api/documentos/${visita._id}/archivo?token=${encodeURIComponent(token)}&descargar=1`}
+                                          className="btn btn-outline"
+                                          style={{fontSize: '0.7rem', padding: '0.25rem 0.55rem', display: 'inline-flex', alignItems: 'center', textDecoration: 'none'}}
+                                          title="Descargar PDF"
+                                        >
+                                          Descargar
+                                        </a>
+                                        <button
+                                          className="btn"
+                                          style={{fontSize: '0.7rem', padding: '0.25rem 0.45rem', background: 'transparent', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)'}}
+                                          onClick={() => handleDeleteDoc(visita._id)}
+                                          title="Eliminar visita"
+                                        >
+                                          Eliminar
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                {visita.responsable && (
+                                  <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>
+                                    <strong>Responsable:</strong> {visita.responsable}
+                                  </div>
+                                )}
+                                {visita.observaciones && (
+                                  <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem'}}>
+                                    {visita.observaciones}
+                                  </div>
+                                )}
+                                <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem'}}>
+                                  <span>Subido el {new Date(visita.fechaSubida || visita.createdAt).toLocaleDateString()} {visita.subidoPor ? `por ${visita.subidoPor}` : ''}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {canManageDocs && (
+                            <div style={{marginTop: '0.75rem', textAlign: 'right'}}>
+                              <button
+                                className="btn btn-outline"
+                                style={{fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'inline-flex', alignItems: 'center'}}
+                                onClick={() => openDocModal('visita')}
+                              >
+                                + Registrar otra visita
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{padding: '0.75rem 0', color: 'var(--text-muted)', fontSize: '0.85rem'}}>
+                          <p style={{marginBottom: canManageDocs ? '0.75rem' : '0'}}>No hay actas de visitas de seguimiento registradas para esta sede.</p>
+                          {canManageDocs && (
+                            <button
+                              className="btn btn-outline"
+                              style={{fontSize: '0.8rem', padding: '0.45rem 0.85rem', display: 'inline-flex', alignItems: 'center', borderColor: 'var(--accent)', color: 'var(--accent)', fontWeight: '600'}}
+                              onClick={() => openDocModal('visita')}
+                            >
+                              Registrar primera visita (PDF)
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -2241,6 +2613,174 @@ const App = () => {
           </div>
         </div>
       )}
+
+      {/* Modal para Subir Documento / Acta de Entrega o Visita de Seguimiento */}
+      {showDocModal && canManageDocs && (
+        <div className="modal-overlay">
+          <div className="modal glass-card" style={{maxWidth: '550px'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
+              <div>
+                <h2 style={{fontSize: '1.3rem', fontWeight: '800'}}>
+                  {docModalType === 'entrega' ? 'Subir Acta de Entrega' : 'Registrar Visita de Seguimiento'}
+                </h2>
+              </div>
+              <button 
+                onClick={() => { setShowDocModal(false); setDocError(''); setDocSuccess(''); }} 
+                style={{background: 'var(--bg-input)', border: 'none', color: 'var(--text-main)', cursor: 'pointer', width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {docError && (
+              <div style={{background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '0.75rem 1rem', borderRadius: '0.5rem', marginBottom: '1rem', border: '1px solid rgba(239,68,68,0.2)', fontSize: '0.85rem'}}>
+                {docError}
+              </div>
+            )}
+
+            {docSuccess && (
+              <div style={{background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', padding: '0.75rem 1rem', borderRadius: '0.5rem', marginBottom: '1rem', border: '1px solid rgba(16,185,129,0.2)', fontSize: '0.85rem'}}>
+                {docSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleUploadDocumento}>
+              <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
+                <div>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                    Tipo de Documento *
+                  </label>
+                  <select
+                    className="search-input"
+                    style={{margin: 0, padding: '0.6rem 0.8rem', width: '100%'}}
+                    value={docForm.tipo}
+                    onChange={(e) => {
+                      setDocForm({ ...docForm, tipo: e.target.value });
+                      setDocModalType(e.target.value);
+                    }}
+                  >
+                    <option value="entrega">Acta de Entrega de Inventario</option>
+                    <option value="visita">Acta de Visita de Seguimiento</option>
+                  </select>
+                </div>
+
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem'}}>
+                  <div>
+                    <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                      Institución Educativa *
+                    </label>
+                    <input
+                      className="search-input"
+                      list="instituciones-list"
+                      style={{margin: 0, padding: '0.5rem 0.8rem', width: '100%'}}
+                      value={docForm.institucion}
+                      onChange={(e) => setDocForm({ ...docForm, institucion: e.target.value.toUpperCase() })}
+                      required
+                      placeholder="Nombre institución..."
+                    />
+                  </div>
+                  <div>
+                    <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                      Sede *
+                    </label>
+                    <input
+                      className="search-input"
+                      list="sedes-list"
+                      style={{margin: 0, padding: '0.5rem 0.8rem', width: '100%'}}
+                      value={docForm.sede}
+                      onChange={(e) => setDocForm({ ...docForm, sede: e.target.value.toUpperCase() })}
+                      required
+                      placeholder="Nombre sede..."
+                    />
+                  </div>
+                </div>
+
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem'}}>
+                  <div>
+                    <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                      {docForm.tipo === 'entrega' ? 'Fecha de Entrega *' : 'Fecha de la Visita *'}
+                    </label>
+                    <input
+                      type="date"
+                      className="search-input"
+                      style={{margin: 0, padding: '0.5rem 0.8rem', width: '100%'}}
+                      value={docForm.fechaDocumento}
+                      onChange={(e) => setDocForm({ ...docForm, fechaDocumento: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                      Responsable / Visitador
+                    </label>
+                    <input
+                      type="text"
+                      className="search-input"
+                      style={{margin: 0, padding: '0.5rem 0.8rem', width: '100%'}}
+                      placeholder="Nombre de quien firma..."
+                      value={docForm.responsable}
+                      onChange={(e) => setDocForm({ ...docForm, responsable: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                    Observaciones / Notas
+                  </label>
+                  <textarea
+                    className="search-input"
+                    rows="2"
+                    style={{margin: 0, padding: '0.5rem 0.8rem', width: '100%', resize: 'vertical'}}
+                    placeholder="Detalles sobre la entrega o aspectos relevantes de la visita..."
+                    value={docForm.observaciones}
+                    onChange={(e) => setDocForm({ ...docForm, observaciones: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label style={{fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem', fontWeight: '600'}}>
+                    Archivo del Acta (Solo formato PDF, máx 25 MB) *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    className="search-input"
+                    style={{margin: 0, padding: '0.5rem 0.8rem', width: '100%'}}
+                    onChange={(e) => setDocForm({ ...docForm, archivo: e.target.files[0] || null })}
+                    required
+                  />
+                </div>
+
+                <div className="modal-actions" style={{display: 'flex', gap: '1rem', marginTop: '1rem', justifyContent: 'flex-end'}}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => { setShowDocModal(false); setDocError(''); setDocSuccess(''); }}
+                    disabled={uploadingDoc}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className={`btn btn-primary${uploadingDoc ? ' btn-loading' : ''}`}
+                    disabled={uploadingDoc}
+                  >
+                    {uploadingDoc ? (
+                      <>
+                        <span className="spinner spinner-sm"></span> Subiendo...
+                      </>
+                    ) : (
+                      'Guardar Documento'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <datalist id="instituciones-list">
         {stats.instituciones?.map(inst => (
           <option key={inst} value={inst} />

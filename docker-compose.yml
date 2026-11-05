@@ -33,10 +33,12 @@ services:
       - DB_NAME=${DB_NAME}
       - PORT=${PORT}
       - JWT_SECRET=${JWT_SECRET}
+      - UPLOADS_DIR=/app/uploads
+      - PROJECT_ROOT=/app
     ports:
       - "${PORT}:${PORT}"
     volumes:
-      - server_uploads:/app/uploads
+      - ./uploads:/app/uploads
     depends_on:
       - mongo
     networks:
@@ -61,7 +63,6 @@ services:
 # DEFINICIÓN DE VOLÚMENES PARA PERSISTENCIA
 volumes:
   mongo_data:
-  server_uploads:
 
 # RED INTERNA
 networks:

@@ -36,3 +36,8 @@ client/dist/
 BD AULAS SITE JEFE.xlsx
 server/BD AULAS SITE JEFE.xlsx
 *.xlsx
+
+# Uploads y PDFs de documentos
+uploads/
+server/uploads/
+*.pdf
